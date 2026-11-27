@@ -1,4 +1,3 @@
-"""Manual DNS endpoints keep database waits off the request event loop."""
 import asyncio
 import threading
 from contextlib import contextmanager
@@ -47,7 +46,6 @@ def test_manual_dns_save_keeps_loop_responsive(monkeypatch, path, full, block_al
     def session():
         yield db
 
-    # The old endpoints use dependency injection; the worker owns a context.
     from app import database
     monkeypatch.setattr(database, "get_db_context", session)
     if hasattr(domains, "get_db_context"):

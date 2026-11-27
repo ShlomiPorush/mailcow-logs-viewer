@@ -1,7 +1,6 @@
-"""MTA-STS checks (RFC 8461): the _mta-sts TXT record, the policy file behind
-it, and whether the domain's MX hosts are covered. DNS and HTTPS are injected;
-no live lookups (the repository's rule for network-facing code)."""
 import asyncio
+import gzip
+import time
 
 import pytest
 
@@ -10,6 +9,7 @@ _orig_init = sf.StaticFiles.__init__
 sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, 'check_dir': False})
 
 import dns.resolver
+import httpx
 
 from app.routers import domains
 
@@ -25,7 +25,6 @@ class FakeMX:
 
 
 def _dns(records):
-    """records: {(name, rtype): [rdata] | Exception}"""
     async def resolve(name, rtype, timeout=5):
         value = records.get((name, rtype))
         if value is None:
@@ -55,8 +54,6 @@ GOOD_POLICY = "version: STSv1\nmode: enforce\nmx: mail.example.test\nmax_age: 60
 
 
 def test_missing_record_is_a_warning_not_an_error(monkeypatch):
-    """MTA-STS is optional, like TLSA. The message must contain 'not published'
-    so detect_dns_changes treats a later removal as definitive."""
     result = _check(monkeypatch, {})
     assert result['status'] == 'warning'
     assert 'not published' in result['message']
@@ -90,8 +87,6 @@ def test_testing_mode_is_a_warning(monkeypatch):
 
 
 def test_record_with_unreachable_policy_is_an_error(monkeypatch):
-    """A published record with a broken policy is worse than no record:
-    senders that enforce MTA-STS treat it as a hard failure."""
     result = _check(monkeypatch, {
         ('_mta-sts.example.test', 'TXT'): [FakeTXT('v=STSv1; id=1;')],
     }, policy=ConnectionError('connection refused'))
@@ -116,8 +111,6 @@ def test_uncovered_mx_under_enforce_is_an_error(monkeypatch):
 
 
 def test_dns_failure_is_unknown_and_never_counts_as_removal(monkeypatch):
-    """A resolver failure must not read as 'the record is gone', or a DNS
-    hiccup would fire a change alert."""
     result = _check(monkeypatch, {
         ('_mta-sts.example.test', 'TXT'): dns.resolver.LifetimeTimeout(),
     })
@@ -126,7 +119,6 @@ def test_dns_failure_is_unknown_and_never_counts_as_removal(monkeypatch):
 
 
 def test_change_detection_fires_on_id_change_only(monkeypatch):
-    """The whole point of the id field: it changes when the policy changes."""
     class Prev:
         spf_check = None
         dkim_check = None
@@ -142,14 +134,12 @@ def test_change_detection_fires_on_id_change_only(monkeypatch):
         'mta_sts': {'status': 'success', 'record': 'v=STSv1; id=OLD;'}})
     assert unchanged == []
 
-    # a failed lookup (record None, no absence keywords) is not a removal
     hiccup = domains.detect_dns_changes(Prev(), {
         'mta_sts': {'status': 'unknown', 'message': 'MTA-STS check failed: timeout', 'record': None}})
     assert hiccup == []
 
-    # a definitive absence is a removal
     removed = domains.detect_dns_changes(Prev(), {
-        'mta_sts': {'status': 'warning', 'message': 'MTA-STS record not published', 'record': None}})
+        'mta_sts': {'status': 'warning', 'message': 'MTA-STS record not published', 'record': None, 'absent': True}})
     assert removed == [{'type': 'MTA-STS', 'old': 'v=STSv1; id=OLD;', 'new': '(removed)'}]
 
 
@@ -160,3 +150,101 @@ def test_policy_parser_handles_crlf_and_junk():
     assert policy['mode'] == 'enforce'
     assert policy['mx'] == ['a.example.test', '*.b.example.test']
     assert policy['max_age'] == '60'
+
+
+class FakeBody(httpx.AsyncByteStream):
+    def __init__(self, chunks, gap=0.0):
+        self.chunks = chunks
+        self.gap = gap
+        self.sent = 0
+        self.closed = False
+
+    async def __aiter__(self):
+        for chunk in self.chunks:
+            if self.gap:
+                await asyncio.sleep(self.gap)
+            self.sent += len(chunk)
+            yield chunk
+
+    async def aclose(self):
+        self.closed = True
+
+
+def _policy_host(monkeypatch, body, headers=None):
+    requests = []
+
+    def handler(request):
+        requests.append(request)
+        return httpx.Response(200, headers=headers or {}, stream=body)
+
+    real_client = httpx.AsyncClient
+
+    class Client(real_client):
+        def __init__(self, *args, **kwargs):
+            kwargs['transport'] = httpx.MockTransport(handler)
+            super().__init__(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, 'AsyncClient', Client)
+    return requests
+
+
+def test_compressed_policy_is_refused_without_reading_it(monkeypatch):
+    bomb = gzip.compress(b'\0' * (4 * 1024 * 1024))
+    body = FakeBody([bomb])
+    _policy_host(monkeypatch, body, {'Content-Encoding': 'gzip'})
+    with pytest.raises(ValueError, match='compressed'):
+        asyncio.run(domains._fetch_mta_sts_policy('example.test'))
+    assert body.sent == 0
+    assert body.closed
+
+
+def test_compressed_policy_makes_the_check_an_error(monkeypatch):
+    monkeypatch.setattr(domains, 'resolve_dns_with_fallback', _dns({
+        ('_mta-sts.example.test', 'TXT'): [FakeTXT('v=STSv1; id=1;')]}))
+    _policy_host(monkeypatch, FakeBody([gzip.compress(GOOD_POLICY.encode())]),
+                 {'Content-Encoding': 'gzip'})
+    result = asyncio.run(domains.check_mta_sts_record('example.test'))
+    assert result['status'] == 'error'
+    assert 'could not be fetched' in result['message']
+
+
+def test_policy_over_the_cap_stops_reading_at_the_cap(monkeypatch):
+    chunk = b'#' * 16384
+    body = FakeBody([chunk] * 100)
+    _policy_host(monkeypatch, body)
+    with pytest.raises(ValueError, match='larger than expected'):
+        asyncio.run(domains._fetch_mta_sts_policy('example.test'))
+    assert body.sent <= domains.MTA_STS_POLICY_MAX_BYTES + len(chunk)
+    assert body.closed
+
+
+def test_declared_length_over_the_cap_is_refused_before_reading(monkeypatch):
+    body = FakeBody([b'#' * 16384] * 100)
+    _policy_host(monkeypatch, body, {'Content-Length': str(16384 * 100)})
+    with pytest.raises(ValueError, match='larger than expected'):
+        asyncio.run(domains._fetch_mta_sts_policy('example.test'))
+    assert body.sent == 0
+
+
+def test_slow_policy_is_cut_by_one_deadline(monkeypatch):
+    monkeypatch.setattr(domains, 'MTA_STS_POLICY_TIMEOUT', 0.5)
+    body = FakeBody([b'version: STSv1\n'] + [b'\n'] * 100, gap=0.05)
+    _policy_host(monkeypatch, body)
+    started = time.monotonic()
+    with pytest.raises(ValueError, match='too long'):
+        asyncio.run(domains._fetch_mta_sts_policy('example.test'))
+    assert time.monotonic() - started < 2
+    assert body.sent < 100
+
+
+def test_valid_policy_is_fetched_uncompressed_and_parsed(monkeypatch):
+    monkeypatch.setattr(domains, 'resolve_dns_with_fallback', _dns({
+        ('_mta-sts.example.test', 'TXT'): [FakeTXT('v=STSv1; id=1;')],
+        ('example.test', 'MX'): [FakeMX('mail.example.test.')],
+    }))
+    requests = _policy_host(monkeypatch, FakeBody([GOOD_POLICY[:20].encode(), GOOD_POLICY[20:].encode()]),
+                            {'Content-Type': 'text/plain'})
+    result = asyncio.run(domains.check_mta_sts_record('example.test'))
+    assert result['status'] == 'success'
+    assert [str(r.url) for r in requests] == ['https://mta-sts.example.test/.well-known/mta-sts.txt']
+    assert requests[0].headers['Accept-Encoding'] == 'identity'

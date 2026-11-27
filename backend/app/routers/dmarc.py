@@ -1,41 +1,47 @@
-"""
-DMARC Router - Domain-centric view (Cloudflare style)
-"""
 import asyncio
 import logging
 import hashlib
 import json
-from typing import Annotated, List, Optional
+from typing import Annotated, List, Optional, Union
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, Query
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File, BackgroundTasks, Query
+from .. import leader
 from sqlalchemy.orm import Session, load_only
-from sqlalchemy import func, and_, or_, case, literal
+from sqlalchemy import func, and_, or_, case, literal, cast, Float
 
 from ..database import SessionLocal, get_db
-from ..models import DMARCReport, DMARCRecord, DMARCSync, TLSReport, TLSReportPolicy
-from ..services.dmarc_parser import parse_dmarc_file
+from ..models import DMARCReport, DMARCRecord, DMARCSync, DomainDNSCheck, TLSReport, TLSReportPolicy
+from ..services.report_identity import ReportBudget, ReportRejectedError, report_kind
+from ..services.report_store import conflicting_report_ids, prepare_report_file, report_sender, store_report
 from ..services.geoip_service import enrich_dmarc_record
-from ..services.dmarc_imap_service import sync_dmarc_reports_from_imap
+from ..services.dmarc_imap_service import sync_dmarc_reports_from_imap, is_sync_running
+from ..services.imap_folders import describe_setting
 from ..services.dmarc_cache import (
     get_dmarc_cache_key, 
     get_dmarc_cached, 
     set_dmarc_cache, 
     clear_dmarc_cache
 )
-from ..config import settings
+from ..config import settings, get_cached_active_domains
+from ..agent_access.scopes import READ
+from ..user_access import caller_may, job_error
 from ..scheduler import update_job_status
-from .domains import get_cached_dns_check, check_dmarc_record, check_tls_rpt_record, parse_dmarc_record_tags
-from ..utils import internal_error
+from .domains import get_cached_dns_check, check_dmarc_record, check_tls_rpt_record, parse_dmarc_record_tags, _public_cached_dns_result
+from ..utils import internal_error, format_datetime_for_api
+from ..app_time import app_tz, day_bounds, day_key, epoch, epoch_day_key, local_now, utc_naive
+from ..api_models import Invalid, documented
+from ..api_models import dmarc as m
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# =============================================================================
-# DOMAINS LIST
-# =============================================================================
 
-@router.post("/dmarc/cache/clear")
+def _cutoff_epoch(days: int) -> int:
+    return epoch(datetime.now(timezone.utc) - timedelta(days=days))
+
+
+@router.post("/dmarc/cache/clear", response_model=None, responses=documented(m.StatusMessage, errors={500: None}))
 def clear_cache(
     db: Session = Depends(get_db)
 ):
@@ -50,7 +56,7 @@ def clear_cache(
         raise internal_error(e)
 
 
-@router.get("/dmarc/insights")
+@router.get("/dmarc/insights", response_model=None, responses=documented(Union[m.DomainInsights, m.AllInsights], description="With domain: that domain's insights. Without: every domain with reports in the window", errors={500: None}))
 def get_dmarc_insights(
     domain: Optional[str] = None,
     db: Session = Depends(get_db)
@@ -69,50 +75,106 @@ def get_dmarc_insights(
         raise internal_error(e)
 
 
-# =============================================================================
-# REPORTS MANAGEMENT
-# =============================================================================
-
-@router.get("/dmarc/reports/config")
+@router.get("/dmarc/reports/config", response_model=None, responses=documented(m.ReportsConfig))
 def get_reports_management_config():
     """
-    Get reports management configuration
+    Get reports management configuration: deleting and uploading reports. The DMARC
+    page reads it with View on DMARC & TLS alone (no Status View needed).
     """
     return {
-        "allow_delete": settings.dmarc_allow_report_delete
+        "allow_delete": settings.dmarc_allow_report_delete,
+        "manual_upload_enabled": settings.dmarc_manual_upload_enabled,
     }
 
 
-@router.get("/dmarc/reports/all")
+REPORT_SEARCH_MAX_LENGTH = 255
+
+
+def _report_search_filters(search: Optional[str]):
+    term = (search or "").strip()[:REPORT_SEARCH_MAX_LENGTH]
+    if not term:
+        return (), ()
+    pattern = "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+    def match(*columns):
+        return (or_(*(column.ilike(pattern, escape="\\") for column in columns)),)
+    return (match(DMARCReport.domain, DMARCReport.org_name),
+            match(TLSReport.policy_domain, TLSReport.organization_name))
+
+
+REPORT_SORT_KEYS = ("created_at", "type", "domain", "reporter", "records", "period")
+
+
+def _report_sort_value(sort_by: str, report_type: str):
+    if sort_by == "type":
+        return literal(report_type)
+    if report_type == "dmarc":
+        if sort_by == "domain":
+            return func.lower(DMARCReport.domain)
+        if sort_by == "reporter":
+            return func.lower(DMARCReport.org_name)
+        if sort_by == "period":
+            return cast(DMARCReport.begin_date, Float)
+    else:
+        if sort_by == "domain":
+            return func.lower(TLSReport.policy_domain)
+        if sort_by == "reporter":
+            return func.lower(TLSReport.organization_name)
+        if sort_by == "period":
+            return cast(func.extract("epoch", TLSReport.start_datetime), Float)
+    return None
+
+
+def _report_union(db: Session, dmarc_match, tls_match, sort_by: str = "created_at"):
+    def branch(model, report_type, match, children):
+        columns = [model.id.label("id"), literal(report_type).label("type"), model.created_at.label("created_at")]
+        query = db.query(*columns).filter(*match)
+        if sort_by == "records":
+            parent = children.dmarc_report_id if report_type == "dmarc" else children.tls_report_id
+            counts = db.query(parent.label("report_id"), func.count(children.id).label("n")).group_by(parent).subquery()
+            query = db.query(*columns, func.coalesce(counts.c.n, 0).label("sort_value")).outerjoin(
+                counts, counts.c.report_id == model.id).filter(*match)
+        elif sort_by != "created_at":
+            query = db.query(*columns, _report_sort_value(sort_by, report_type).label("sort_value")).filter(*match)
+        return query
+    return branch(DMARCReport, "dmarc", dmarc_match, DMARCRecord).union_all(
+        branch(TLSReport, "tls", tls_match, TLSReportPolicy)).subquery()
+
+
+@router.get("/dmarc/reports/all", response_model=None, responses=documented(Union[m.AllReportsPage, m.AllReports], description="With page: one page. Without: every matching report", errors={422: Invalid, 500: None}))
 def get_all_reports(
     db: Session = Depends(get_db),
     page: Annotated[Optional[int], Query(ge=1)] = None,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    search: Optional[str] = None,
+    sort_by: Annotated[str, Query(pattern="^(" + "|".join(REPORT_SORT_KEYS) + ")$")] = "created_at",
+    sort_dir: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
 ):
     """
     Get report summaries. Omit page to preserve the legacy unpaginated response.
+    search keeps the reports whose domain or reporter contains it (any case).
+    sort_by and sort_dir order the paged list across both report types before paging.
     """
     try:
         reports = []
         selected = None
+        dmarc_match, tls_match = _report_search_filters(search)
         if page is not None:
-            combined = db.query(
-                DMARCReport.id.label("id"), literal("dmarc").label("type"),
-                DMARCReport.created_at.label("created_at"),
-            ).union_all(db.query(
-                TLSReport.id, literal("tls"), TLSReport.created_at,
-            )).subquery()
-            total = db.query(func.count()).select_from(combined).scalar()
+            total = db.query(func.count()).select_from(_report_union(db, dmarc_match, tls_match)).scalar()
             total_pages = max(1, (total + limit - 1) // limit)
             page = min(page, total_pages)
+            combined = _report_union(db, dmarc_match, tls_match, sort_by)
+            tiebreak = [combined.c.created_at.desc().nulls_last(), combined.c.type, combined.c.id.desc()]
+            if sort_by == "created_at":
+                primary = [combined.c.created_at.asc().nulls_last()] if sort_dir == "asc" else []
+            else:
+                value = combined.c.sort_value
+                primary = [value.asc().nulls_last() if sort_dir == "asc" else value.desc().nulls_last()]
             selected = db.query(combined.c.id, combined.c.type).order_by(
-                combined.c.created_at.desc().nulls_last(),
-                combined.c.type, combined.c.id.desc(),
+                *primary, *tiebreak,
             ).offset((page - 1) * limit).limit(limit).all()
             dmarc_ids = [row.id for row in selected if row.type == "dmarc"]
             tls_ids = [row.id for row in selected if row.type == "tls"]
         
-        # Get DMARC reports
         record_counts = db.query(
             DMARCRecord.dmarc_report_id.label("report_id"),
             func.count(DMARCRecord.id).label("record_count"),
@@ -130,6 +192,8 @@ def get_all_reports(
         )
         if selected is not None:
             dmarc_reports = dmarc_reports.filter(DMARCReport.id.in_(dmarc_ids))
+        else:
+            dmarc_reports = dmarc_reports.filter(*dmarc_match)
         dmarc_reports = dmarc_reports.order_by(DMARCReport.created_at.desc()).all() if selected is None or dmarc_ids else []
 
         for report, record_count in dmarc_reports:
@@ -142,11 +206,10 @@ def get_all_reports(
                 "begin_date": report.begin_date,
                 "end_date": report.end_date,
                 "record_count": record_count,
-                "created_at": report.created_at.isoformat() if report.created_at else None,
+                "created_at": format_datetime_for_api(report.created_at),
                 "report_id": report.report_id
             })
         
-        # Get TLS reports
         policy_counts = db.query(
             TLSReportPolicy.tls_report_id.label("report_id"),
             func.count(TLSReportPolicy.id).label("policy_count"),
@@ -164,6 +227,8 @@ def get_all_reports(
         )
         if selected is not None:
             tls_reports = tls_reports.filter(TLSReport.id.in_(tls_ids))
+        else:
+            tls_reports = tls_reports.filter(*tls_match)
         tls_reports = tls_reports.order_by(TLSReport.created_at.desc()).all() if selected is None or tls_ids else []
 
         for report, policy_count in tls_reports:
@@ -173,23 +238,29 @@ def get_all_reports(
                 "type": "tls",
                 "domain": report.policy_domain,
                 "org_name": report.organization_name,
-                "begin_date": int(report.start_datetime.timestamp()) if report.start_datetime else None,
-                "end_date": int(report.end_datetime.timestamp()) if report.end_datetime else None,
+                "begin_date": epoch(report.start_datetime) if report.start_datetime else None,
+                "end_date": epoch(report.end_datetime) if report.end_datetime else None,
                 "record_count": policy_count,
-                "created_at": report.created_at.isoformat() if report.created_at else None,
+                "created_at": format_datetime_for_api(report.created_at),
                 "report_id": report.report_id
             })
-        
+
+        for kind, type_name in (("dmarc", "dmarc"), ("tls-rpt", "tls")):
+            rows = [row for row in reports if row["type"] == type_name]
+            shared = conflicting_report_ids(db, kind, (row["report_id"] for row in rows))
+            for row in rows:
+                row["shared_report_id"] = row["report_id"] in shared
+
         if selected is not None:
             positions = {(row.type, row.id): index for index, row in enumerate(selected)}
             reports.sort(key=lambda row: positions[row["type"], row["id"]])
             return {
                 "reports": reports, "total": total, "page": page,
                 "limit": limit, "total_pages": total_pages,
+                "sort_by": sort_by, "sort_dir": sort_dir,
                 "allow_delete": settings.dmarc_allow_report_delete,
             }
 
-        # Sort all reports by created_at (newest first)
         reports.sort(key=lambda x: x["created_at"] or "", reverse=True)
         
         return {
@@ -203,7 +274,113 @@ def get_all_reports(
         raise internal_error(e)
 
 
-@router.delete("/dmarc/reports/{report_type}/{report_id}")
+def _report_domain_key(column):
+    return func.lower(func.trim(column))
+
+
+def _normalize_report_domain(domain: str) -> str:
+    name = (domain or "").strip().lower()
+    if not name or len(name) > 255:
+        raise HTTPException(status_code=400, detail="A domain name is required")
+    return name
+
+
+@router.get("/dmarc/reports/domains", response_model=None, responses=documented(m.ReportsByDomain, errors={500: None}))
+def get_reports_by_domain(db: Session = Depends(get_db)):
+    """
+    How many DMARC and TLS reports each domain has, and the end of its latest report period.
+    """
+    try:
+        dmarc_key = _report_domain_key(DMARCReport.domain).label("domain")
+        dmarc_rows = db.query(
+            dmarc_key, func.count(DMARCReport.id), func.max(DMARCReport.end_date),
+        ).group_by(dmarc_key).all()
+        tls_key = _report_domain_key(TLSReport.policy_domain).label("domain")
+        tls_rows = db.query(
+            tls_key, func.count(TLSReport.id), func.max(TLSReport.end_datetime),
+        ).group_by(tls_key).all()
+
+        domains = {}
+        def entry(name):
+            return domains.setdefault(name, {"domain": name, "dmarc_reports": 0, "tls_reports": 0, "last_report": None})
+        for name, count, last in dmarc_rows:
+            row = entry(name)
+            row["dmarc_reports"] = count
+            row["last_report"] = last
+        for name, count, last in tls_rows:
+            row = entry(name)
+            row["tls_reports"] = count
+            last = epoch(last) if last else None
+            if last is not None and (row["last_report"] is None or last > row["last_report"]):
+                row["last_report"] = last
+
+        return {
+            "domains": sorted(domains.values(), key=lambda row: row["domain"]),
+            "allow_delete": settings.dmarc_allow_report_delete,
+        }
+    except Exception as e:
+        logger.error(f"Error fetching reports by domain: {e}")
+        raise internal_error(e)
+
+
+@router.delete("/dmarc/reports/domains/{domain}", response_model=None, responses=documented(m.DomainReportsDeleted, errors={400: None, 403: None, 404: None, 500: None}))
+def delete_domain_reports(domain: str, db: Session = Depends(get_db)):
+    """
+    Delete every DMARC and TLS report of one domain, with their records and policies
+    """
+    if not settings.dmarc_allow_report_delete:
+        raise HTTPException(
+            status_code=403,
+            detail="Report deletion is disabled. Set DMARC_ALLOW_REPORT_DELETE=true to enable."
+        )
+    name = _normalize_report_domain(domain)
+
+    try:
+        dmarc_ids = db.query(DMARCReport.id).filter(_report_domain_key(DMARCReport.domain) == name)
+        tls_ids = db.query(TLSReport.id).filter(_report_domain_key(TLSReport.policy_domain) == name)
+
+        dmarc_records = db.query(DMARCRecord).filter(
+            DMARCRecord.dmarc_report_id.in_(dmarc_ids.scalar_subquery())
+        ).delete(synchronize_session=False)
+        dmarc_reports = db.query(DMARCReport).filter(
+            _report_domain_key(DMARCReport.domain) == name
+        ).delete(synchronize_session=False)
+        tls_policies = db.query(TLSReportPolicy).filter(
+            TLSReportPolicy.tls_report_id.in_(tls_ids.scalar_subquery())
+        ).delete(synchronize_session=False)
+        tls_reports = db.query(TLSReport).filter(
+            _report_domain_key(TLSReport.policy_domain) == name
+        ).delete(synchronize_session=False)
+
+        if dmarc_reports == 0 and tls_reports == 0:
+            db.rollback()
+            raise HTTPException(status_code=404, detail="No reports found for this domain")
+
+        db.commit()
+        clear_dmarc_cache(db)
+
+        logger.info(
+            f"Deleted all reports of {name}: {dmarc_reports} DMARC reports ({dmarc_records} records), "
+            f"{tls_reports} TLS reports ({tls_policies} policies)"
+        )
+        return {
+            "status": "success",
+            "domain": name,
+            "dmarc_reports": dmarc_reports,
+            "dmarc_records": dmarc_records,
+            "tls_reports": tls_reports,
+            "tls_policies": tls_policies,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Error deleting the reports of a domain: {e}")
+        raise internal_error(e)
+
+
+@router.delete("/dmarc/reports/{report_type}/{report_id}", response_model=None, responses=documented(m.StatusMessage, errors={400: None, 403: None, 404: None, 422: Invalid, 500: None}))
 def delete_report(
     report_type: str,
     report_id: int,
@@ -212,7 +389,6 @@ def delete_report(
     """
     Delete a specific DMARC or TLS report
     """
-    # Check if deletion is allowed
     if not settings.dmarc_allow_report_delete:
         raise HTTPException(
             status_code=403, 
@@ -221,24 +397,20 @@ def delete_report(
     
     try:
         if report_type == "dmarc":
-            # Delete associated records first
             db.query(DMARCRecord).filter(
                 DMARCRecord.dmarc_report_id == report_id
             ).delete()
             
-            # Delete the report
             result = db.query(DMARCReport).filter(DMARCReport.id == report_id).delete()
             
             if result == 0:
                 raise HTTPException(status_code=404, detail="Report not found")
                 
         elif report_type == "tls":
-            # Delete associated policies first
             db.query(TLSReportPolicy).filter(
                 TLSReportPolicy.tls_report_id == report_id
             ).delete()
             
-            # Delete the report
             result = db.query(TLSReport).filter(TLSReport.id == report_id).delete()
             
             if result == 0:
@@ -248,7 +420,6 @@ def delete_report(
         
         db.commit()
         
-        # Clear cache
         clear_dmarc_cache(db)
         
         return {"status": "success", "message": f"{report_type.upper()} report deleted"}
@@ -261,21 +432,82 @@ def delete_report(
         raise internal_error(e)
 
 
-@router.get("/dmarc/domains")
-def get_domains_list(
-    db: Session = Depends(get_db)
-):
+@router.get("/dmarc/domains", response_model=None, responses=documented(m.DomainsList, errors={500: None}))
+async def get_domains_list():
     """
-    Get list of all domains with DMARC and/or TLS-RPT reports and their statistics
+    Get list of all domains with DMARC and/or TLS-RPT reports and their statistics,
+    each with the state of its DMARC and TLS-RPT records and how many senders fail
+    DMARC. The records come from the stored DNS checks; a domain that has none (one
+    that is not a mailcow domain) is looked up live, once per cache period.
+    Each domain says whether it is a domain on this mailcow server (on_mailcow).
     """
     try:
-        # Check cache first
         cache_key = get_dmarc_cache_key("domains_list")
-        cached_result = get_dmarc_cached(cache_key, db)
+        cached_result = await asyncio.to_thread(_cached_domains_list, cache_key)
         if cached_result is not None:
+            _mark_on_mailcow(cached_result['domains'])
             return cached_result
-        
-        # Get domains from DMARC reports
+
+        response, stored = await asyncio.to_thread(_build_domains_list)
+        names = [d['domain'] for d in response['domains']]
+        checks = await asyncio.gather(*(_live_record_checks(name, *stored.get(name, (None, None))) for name in names))
+        checks = dict(zip(names, checks))
+        for entry in response['domains']:
+            dmarc_check, tls_check = checks[entry['domain']]
+            entry['dmarc_record'] = _record_state(dmarc_check, with_policy=True)
+            entry['tls_rpt_record'] = _record_state(tls_check)
+
+        set_dmarc_cache(cache_key, response)
+        _mark_on_mailcow(response['domains'])
+        return response
+    except Exception as e:
+        logger.error(f"Error fetching domains list: {e}")
+        raise internal_error(e)
+
+
+def _on_mailcow_check():
+    def norm(name):
+        return (name or '').strip().rstrip('.').lower()
+    active = {norm(name) for name in (get_cached_active_domains() or [])} - {''}
+    return lambda domain: (norm(domain) in active) if active else None
+
+
+def _mark_on_mailcow(entries):
+    on_mailcow = _on_mailcow_check()
+    for entry in entries:
+        entry['on_mailcow'] = on_mailcow(entry['domain'])
+
+
+def _cached_domains_list(cache_key: str):
+    with SessionLocal() as db:
+        return get_dmarc_cached(cache_key, db)
+
+
+async def _live_record_checks(domain: str, dmarc_check=None, tls_check=None):
+    async def one(stored, check):
+        if stored:
+            return stored
+        try:
+            return await asyncio.wait_for(check(domain), timeout=8)
+        except Exception as e:
+            logger.debug(f"Live record check failed for {domain}: {e}")
+            return None
+    return tuple(await asyncio.gather(one(dmarc_check, check_dmarc_record), one(tls_check, check_tls_rpt_record)))
+
+
+def _record_state(check, with_policy: bool = False) -> dict:
+    if not check:
+        state = {'checked': False, 'found': False, 'status': None}
+    else:
+        state = {'checked': True, 'found': bool(check.get('record')), 'status': check.get('status')}
+    if with_policy:
+        policy = (check or {}).get('policy') or ((check or {}).get('settings') or {}).get('policy')
+        state['policy'] = str(policy).lower() if state['found'] and policy else None
+    return state
+
+
+def _build_domains_list():
+    with SessionLocal() as db:
         dmarc_domains = db.query(
             DMARCReport.domain,
             func.count(DMARCReport.id).label('report_count'),
@@ -285,13 +517,11 @@ def get_domains_list(
             DMARCReport.domain
         ).all()
         
-        # Get domains from TLS reports
         tls_domains = db.query(
             TLSReport.policy_domain
         ).distinct().all()
         tls_domain_set = {d[0] for d in tls_domains}
         
-        # Combine domains
         all_domains = set()
         dmarc_domain_data = {}
         
@@ -303,16 +533,30 @@ def get_domains_list(
                 'last_report': last_report
             }
         
-        # Add TLS-only domains
         all_domains.update(tls_domain_set)
+
+        tls_period = {
+            name: (first, last)
+            for name, first, last in db.query(
+                TLSReport.policy_domain, func.min(TLSReport.start_datetime), func.max(TLSReport.end_datetime)
+            ).group_by(TLSReport.policy_domain).all()
+        }
+
+        def tls_ts(domain, i):
+            value = tls_period.get(domain, (None, None))[i]
+            return epoch(value) if value else None
+
+        tls_rpt_status = {
+            name: (check or {}).get('status')
+            for name, check in db.query(DomainDNSCheck.domain_name, DomainDNSCheck.tls_rpt_check).all()
+        }
         
         domains_list = []
-        
+        thirty_days_ago = _cutoff_epoch(30)
+        thirty_days_ago_datetime = utc_naive(datetime.now(timezone.utc) - timedelta(days=30))
+
         for domain in all_domains:
-            thirty_days_ago = int((datetime.now() - timedelta(days=30)).timestamp())
-            thirty_days_ago_datetime = datetime.now() - timedelta(days=30)
-            
-            # Get TLS stats for this domain
+
             tls_stats = db.query(
                 func.count(TLSReport.id).label('tls_report_count'),
                 func.sum(TLSReportPolicy.successful_session_count).label('tls_success'),
@@ -333,7 +577,6 @@ def get_domains_list(
             tls_total = tls_success + tls_fail
             tls_success_pct = round((tls_success / tls_total * 100) if tls_total > 0 else 100, 2)
             
-            # Get DMARC stats
             dmarc_data = dmarc_domain_data.get(domain)
             if dmarc_data:
                 stats = db.query(
@@ -366,15 +609,18 @@ def get_domains_list(
                     'last_report': dmarc_data['last_report'],
                     'has_dmarc': True,
                     'has_tls': domain in tls_domain_set,
+                    'tls_rpt_status': tls_rpt_status.get(domain),
+                    'tls_first_report': tls_ts(domain, 0),
+                    'tls_last_report': tls_ts(domain, 1),
                     'stats_30d': {
                         'total_messages': total_msgs,
                         'unique_ips': stats.unique_ips or 0,
                         'dmarc_pass_pct': round((dmarc_pass / total_msgs * 100) if total_msgs > 0 else 0, 2),
-                        'tls_success_pct': tls_success_pct
+                        'tls_success_pct': tls_success_pct,
+                        'tls_sessions': tls_total
                     }
                 })
             else:
-                # TLS-only domain
                 tls_report = db.query(TLSReport).filter(
                     TLSReport.policy_domain == domain
                 ).order_by(TLSReport.end_datetime.desc()).first()
@@ -387,42 +633,61 @@ def get_domains_list(
                     'domain': domain,
                     'report_count': 0,
                     'tls_report_count': tls_report_count,
-                    'first_report': int(first_tls.timestamp()) if first_tls else None,
-                    'last_report': int(tls_report.end_datetime.timestamp()) if tls_report and tls_report.end_datetime else None,
+                    'first_report': epoch(first_tls) if first_tls else None,
+                    'last_report': epoch(tls_report.end_datetime) if tls_report and tls_report.end_datetime else None,
                     'has_dmarc': False,
                     'has_tls': True,
+                    'tls_rpt_status': tls_rpt_status.get(domain),
+                    'tls_first_report': tls_ts(domain, 0),
+                    'tls_last_report': tls_ts(domain, 1),
                     'stats_30d': {
                         'total_messages': 0,
                         'unique_ips': 0,
                         'dmarc_pass_pct': 0,
-                        'tls_success_pct': tls_success_pct
+                        'tls_success_pct': tls_success_pct,
+                        'tls_sessions': tls_total
                     }
                 })
         
-        # Sort by last_report, handling None values
-        domains_list.sort(key=lambda x: x['last_report'] or 0, reverse=True)
-        
-        response = {
-            'domains': domains_list,
-            'total': len(domains_list)
+        failing = {}
+        for name, total, passed in db.query(
+            DMARCReport.domain,
+            func.sum(DMARCRecord.count),
+            func.sum(case((or_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count), else_=0))
+        ).join(DMARCReport, DMARCRecord.dmarc_report_id == DMARCReport.id).filter(
+            DMARCReport.begin_date >= _cutoff_epoch(30)
+        ).group_by(DMARCReport.domain, DMARCRecord.source_ip).all():
+            if total and (passed or 0) / total < 0.5:
+                failing[name] = failing.get(name, 0) + 1
+        for entry in domains_list:
+            entry['failing_sources'] = failing.get(entry['domain'], 0)
+
+        stored = {
+            name: (_public_cached_dns_result(dmarc), _public_cached_dns_result(tls))
+            for name, dmarc, tls in db.query(DomainDNSCheck.domain_name, DomainDNSCheck.dmarc_check, DomainDNSCheck.tls_rpt_check)
+            .filter(DomainDNSCheck.domain_name.in_(all_domains)).all()
+            if dmarc or tls
         }
-        
-        # Cache the result
-        set_dmarc_cache(cache_key, response)
-        
-        return response
-        
-    except Exception as e:
-        logger.error(f"Error fetching domains list: {e}")
-        raise internal_error(e)
+
+        daily = {}
+        for begin, total, passed in db.query(
+            DMARCReport.begin_date, func.sum(DMARCRecord.count),
+            func.sum(case((or_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count), else_=0))
+        ).join(DMARCReport, DMARCRecord.dmarc_report_id == DMARCReport.id).filter(
+            DMARCReport.begin_date >= _cutoff_epoch(30)
+        ).group_by(DMARCReport.id, DMARCReport.begin_date).all():
+            day = epoch_day_key(begin)
+            entry = daily.setdefault(day, {'date': day, 'total': 0, 'dmarc_pass': 0, 'dmarc_fail': 0})
+            entry['total'] += total or 0
+            entry['dmarc_pass'] += passed or 0
+            entry['dmarc_fail'] += (total or 0) - (passed or 0)
+
+        domains_list.sort(key=lambda x: x['last_report'] or 0, reverse=True)
+
+        return {'domains': domains_list, 'total': len(domains_list), 'daily': sorted(daily.values(), key=lambda d: d['date'])}, stored
 
 
-
-# =============================================================================
-# DOMAIN OVERVIEW
-# =============================================================================
-
-@router.get("/dmarc/domains/{domain}/overview")
+@router.get("/dmarc/domains/{domain}/overview", response_model=None, responses=documented(m.DomainOverview, errors={422: Invalid, 500: None}))
 async def get_domain_overview(domain: str, days: int = 30):
     """Get daily domain statistics and cached or live DMARC and TLS-RPT DNS status."""
     try:
@@ -431,17 +696,28 @@ async def get_domain_overview(domain: str, days: int = 30):
             dmarc_record = await check_dmarc_record(domain)
         if tls_rpt_record is None:
             tls_rpt_record = await check_tls_rpt_record(domain)
-        return await asyncio.to_thread(_load_domain_overview, domain, days, dmarc_record, tls_rpt_record)
+        overview = await asyncio.to_thread(_load_domain_overview, domain, days, dmarc_record, tls_rpt_record)
+        overview['on_mailcow'] = _on_mailcow_check()(domain)
+        return overview
     except Exception as e:
         logger.error(f"Error fetching domain overview: {e}")
         raise internal_error(e)
 
 
-def _load_overview_dns(domain: str):
-    """Close the cache session before any live DNS lookup.
+@router.get("/dmarc/domains/{domain}/tls-rpt-record", response_model=None, responses=documented(m.TlsRptRecordResponse, errors={500: None}))
+async def get_domain_tls_rpt_record(domain: str):
+    """The domain's TLS-RPT record for the TLS tab: the cached check, or a live lookup when none is cached."""
+    try:
+        _, record = await asyncio.to_thread(_load_overview_dns, domain)
+        if record is None:
+            record = await check_tls_rpt_record(domain)
+        return {'domain': domain, 'tls_rpt_record': record}
+    except Exception as e:
+        logger.error(f"Error fetching the TLS-RPT record: {e}")
+        raise internal_error(e)
 
-    Returns the cached (dmarc, tls_rpt) checks; either is None when not cached.
-    """
+
+def _load_overview_dns(domain: str):
     dmarc_record = tls_rpt_record = None
     with SessionLocal() as db:
         dns_checks = get_cached_dns_check(db, domain) or {}
@@ -455,9 +731,8 @@ def _load_overview_dns(domain: str):
 
 
 def _load_domain_overview(domain: str, days: int, dmarc_record: dict, tls_rpt_record: dict):
-    """Read and aggregate reports entirely within a worker-owned session."""
     with SessionLocal() as db:
-        cutoff_timestamp = int((datetime.now() - timedelta(days=days)).timestamp())
+        cutoff_timestamp = _cutoff_epoch(days)
         
         reports = db.query(DMARCReport).filter(
             and_(
@@ -490,7 +765,7 @@ def _load_domain_overview(domain: str, days: int, dmarc_record: dict, tls_rpt_re
         all_reporters = set()
         
         for report in reports:
-            report_date = datetime.fromtimestamp(report.begin_date).date().isoformat()
+            report_date = epoch_day_key(report.begin_date)
             
             if report_date not in daily_data:
                 daily_data[report_date] = {
@@ -553,16 +828,56 @@ def _load_domain_overview(domain: str, days: int, dmarc_record: dict, tls_rpt_re
         }
 
 
-# =============================================================================
-# DOMAIN REPORTS (by day)
-# =============================================================================
+MAX_CALENDAR_DAYS = 400
 
-@router.get("/dmarc/domains/{domain}/reports")
+
+@router.get("/dmarc/domains/{domain}/calendar", response_model=None, responses=documented(m.DomainCalendar, errors={422: Invalid, 500: None}))
+def get_domain_calendar(
+    domain: str,
+    days: Optional[int] = Query(None, ge=1, le=MAX_CALENDAR_DAYS, description="Whole days back from today; the DMARC retention by default"),
+    db: Session = Depends(get_db),
+):
+    """A domain's messages and DMARC passes per day of the app's zone, for its
+    calendar: whole calendar days from the first one to today (the same bounds
+    as a day's own view), summed in one query whatever the number of reports.
+    Reports go by import date (DMARC retention), so a day before the retention
+    may miss some: maybe_incomplete_before says from which day back."""
+    try:
+        keep = max(1, int(settings.dmarc_retention_days or 60))
+        count = days or min(MAX_CALENDAR_DAYS, keep)
+        today = local_now().date()
+        first = today - timedelta(days=count - 1)
+        start, _ = day_bounds(first)
+        zone = getattr(app_tz(), 'key', 'UTC')
+        local_day = func.date(func.timezone(zone, func.to_timestamp(DMARCReport.begin_date)))
+        passed = case((or_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count), else_=0)
+        rows = db.query(local_day.label('day'), func.sum(DMARCRecord.count), func.sum(passed)).join(
+            DMARCRecord, DMARCRecord.dmarc_report_id == DMARCReport.id
+        ).filter(
+            DMARCReport.domain == domain, DMARCReport.begin_date >= epoch(start)
+        ).group_by(local_day).order_by(local_day).all()
+        out = []
+        for day, total, ok in rows:
+            total, ok = int(total or 0), int(ok or 0)
+            if day is None or day < first or day > today:
+                continue
+            out.append({'date': day.isoformat(), 'total': total, 'pass': ok, 'fail': total - ok})
+        return {
+            'domain': domain, 'from': first.isoformat(), 'to': today.isoformat(), 'retention_days': keep,
+            'maybe_incomplete_before': (today - timedelta(days=keep - 1)).isoformat(),
+            'days': out,
+        }
+    except Exception as e:
+        logger.error(f"Error building the DMARC calendar: {e}")
+        raise internal_error(e)
+
+
+@router.get("/dmarc/domains/{domain}/reports", response_model=None, responses=documented(m.DomainReports, errors={422: Invalid, 500: None}))
 def get_domain_reports(
     domain: str,
     days: int = 30,
-    page: int = 1,
-    limit: int = 50,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """
@@ -570,7 +885,7 @@ def get_domain_reports(
     Groups multiple reports from same day together
     """
     try:
-        cutoff_timestamp = int((datetime.now() - timedelta(days=days)).timestamp())
+        cutoff_timestamp = _cutoff_epoch(days)
         
         reports = db.query(DMARCReport).filter(
             and_(
@@ -582,7 +897,7 @@ def get_domain_reports(
         daily_reports = {}
         
         for report in reports:
-            report_date = datetime.fromtimestamp(report.begin_date).date().isoformat()
+            report_date = epoch_day_key(report.begin_date)
             
             if report_date not in daily_reports:
                 daily_reports[report_date] = {
@@ -657,11 +972,7 @@ def get_domain_reports(
         raise internal_error(e)
 
 
-# =============================================================================
-# REPORT DETAILS (specific date)
-# =============================================================================
-
-@router.get("/dmarc/domains/{domain}/reports/{report_date}/details")
+@router.get("/dmarc/domains/{domain}/reports/{report_date}/details", response_model=None, responses=documented(m.ReportDetails, errors={400: None, 404: None, 500: None}))
 def get_report_details(
     domain: str,
     report_date: str,
@@ -672,15 +983,13 @@ def get_report_details(
     Shows all sources (IPs) that sent emails on that day
     """
     try:
-        date_obj = datetime.strptime(report_date, '%Y-%m-%d').date()
-        start_timestamp = int(datetime.combine(date_obj, datetime.min.time()).timestamp())
-        end_timestamp = int(datetime.combine(date_obj, datetime.max.time()).timestamp())
-        
+        day_start, next_day = day_bounds(datetime.strptime(report_date, '%Y-%m-%d').date())
+
         reports = db.query(DMARCReport).filter(
             and_(
                 DMARCReport.domain == domain,
-                DMARCReport.begin_date >= start_timestamp,
-                DMARCReport.begin_date <= end_timestamp
+                DMARCReport.begin_date >= epoch(day_start),
+                DMARCReport.begin_date < epoch(next_day)
             )
         ).all()
         
@@ -703,7 +1012,6 @@ def get_report_details(
             
             for record in records:
                 ip = record.source_ip
-                # Aggregate by (IP + reporter) so each reporter gets its own row
                 key = (ip, report.org_name)
                 
                 if key not in sources:
@@ -772,6 +1080,8 @@ def get_report_details(
             'sources': sources_list
         }
         
+    except HTTPException:
+        raise
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     except Exception as e:
@@ -779,16 +1089,12 @@ def get_report_details(
         raise internal_error(e)
 
 
-# =============================================================================
-# DOMAIN SOURCES
-# =============================================================================
-
-@router.get("/dmarc/domains/{domain}/sources")
+@router.get("/dmarc/domains/{domain}/sources", response_model=None, responses=documented(m.DomainSources, errors={422: Invalid, 500: None}))
 def get_domain_sources(
     domain: str,
     days: int = 30,
-    page: int = 1,
-    limit: int = 50,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """
@@ -796,7 +1102,7 @@ def get_domain_sources(
     With GeoIP enrichment
     """
     try:
-        cutoff_timestamp = int((datetime.now() - timedelta(days=days)).timestamp())
+        cutoff_timestamp = _cutoff_epoch(days)
         
         records_query = db.query(
             DMARCRecord.source_ip,
@@ -857,26 +1163,36 @@ def get_domain_sources(
         total = len(sources_list)
         start = (page - 1) * limit
         end = start + limit
-        
+        page_rows = sources_list[start:end]
+
+        reporters = {}
+        for ip, org, count, passed in db.query(
+            DMARCRecord.source_ip, DMARCReport.org_name, func.sum(DMARCRecord.count),
+            func.sum(case((or_(DMARCRecord.spf_result == 'pass', DMARCRecord.dkim_result == 'pass'), DMARCRecord.count), else_=0))
+        ).join(DMARCReport, DMARCRecord.dmarc_report_id == DMARCReport.id).filter(
+            DMARCReport.domain == domain,
+            DMARCReport.begin_date >= cutoff_timestamp,
+            DMARCRecord.source_ip.in_([row['source_ip'] for row in page_rows])
+        ).group_by(DMARCRecord.source_ip, DMARCReport.org_name).all():
+            reporters.setdefault(ip, []).append({'org_name': org, 'count': count or 0, 'dmarc_pass': passed or 0})
+        for row in page_rows:
+            row['reporters'] = sorted(reporters.get(row['source_ip'], []), key=lambda r: -r['count'])
+
         return {
             'domain': domain,
             'total': total,
             'page': page,
             'limit': limit,
             'pages': (total + limit - 1) // limit if total > 0 else 0,
-            'data': sources_list[start:end]
+            'data': page_rows
         }
-        
+
     except Exception as e:
         logger.error(f"Error fetching domain sources: {e}")
         raise internal_error(e)
 
 
-# =============================================================================
-# SOURCE DETAILS (specific IP aggregated across dates)
-# =============================================================================
-
-@router.get("/dmarc/domains/{domain}/sources/{source_ip}/details")
+@router.get("/dmarc/domains/{domain}/sources/{source_ip}/details", response_model=None, responses=documented(m.SourceDetails, errors={404: None, 422: Invalid, 500: None}))
 def get_source_details(
     domain: str,
     source_ip: str,
@@ -888,7 +1204,7 @@ def get_source_details(
     Shows all dates when this IP sent emails, grouped by envelope_from
     """
     try:
-        cutoff_timestamp = int((datetime.now() - timedelta(days=days)).timestamp())
+        cutoff_timestamp = _cutoff_epoch(days)
         
         records = db.query(DMARCRecord, DMARCReport).join(
             DMARCReport,
@@ -917,7 +1233,6 @@ def get_source_details(
             envelope = record.envelope_from
             reporters.add(report.org_name)
             
-            # Aggregate by (envelope_from + reporter) so each reporter gets its own row
             key = (envelope, report.org_name)
             
             if key not in envelope_from_groups:
@@ -976,19 +1291,18 @@ def get_source_details(
             'envelope_from_groups': envelope_list
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error fetching source details: {e}")
         raise internal_error(e)
-# =============================================================================
-# TLS-RPT REPORTS
-# =============================================================================
 
-@router.get("/dmarc/domains/{domain}/tls-reports")
+@router.get("/dmarc/domains/{domain}/tls-reports", response_model=None, responses=documented(m.TlsReports, errors={422: Invalid, 500: None}))
 def get_domain_tls_reports(
     domain: str,
     days: int = 30,
-    page: int = 1,
-    limit: int = 50,
+    page: int = Query(1, ge=1),
+    limit: int = Query(50, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """
@@ -996,9 +1310,8 @@ def get_domain_tls_reports(
     Returns list of TLS reports with organization, date range, success/fail counts
     """
     try:
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff_date = utc_naive(datetime.now(timezone.utc) - timedelta(days=days))
         
-        # Query TLS reports for domain
         reports_query = db.query(TLSReport).filter(
             and_(
                 TLSReport.policy_domain == domain,
@@ -1009,14 +1322,12 @@ def get_domain_tls_reports(
         total = reports_query.count()
         reports = reports_query.offset((page - 1) * limit).limit(limit).all()
         
-        # Get aggregated totals
         total_success = 0
         total_fail = 0
         organizations = set()
         
         reports_list = []
         for report in reports:
-            # Get policies for this report
             policies = db.query(TLSReportPolicy).filter(
                 TLSReportPolicy.tls_report_id == report.id
             ).all()
@@ -1042,8 +1353,8 @@ def get_domain_tls_reports(
                 'report_id': report.report_id,
                 'organization_name': report.organization_name,
                 'contact_info': report.contact_info,
-                'start_datetime': report.start_datetime.isoformat() if report.start_datetime else None,
-                'end_datetime': report.end_datetime.isoformat() if report.end_datetime else None,
+                'start_datetime': format_datetime_for_api(report.start_datetime),
+                'end_datetime': format_datetime_for_api(report.end_datetime),
                 'successful_sessions': report_success,
                 'failed_sessions': report_fail,
                 'total_sessions': report_success + report_fail,
@@ -1072,12 +1383,12 @@ def get_domain_tls_reports(
         raise internal_error(e)
 
 
-@router.get("/dmarc/domains/{domain}/tls-reports/daily")
+@router.get("/dmarc/domains/{domain}/tls-reports/daily", response_model=None, responses=documented(m.TlsDaily, errors={422: Invalid, 500: None}))
 def get_domain_tls_daily_reports(
     domain: str,
     days: int = 30,
-    page: int = 1,
-    limit: int = 30,
+    page: int = Query(1, ge=1),
+    limit: int = Query(30, ge=1, le=500),
     db: Session = Depends(get_db)
 ):
     """
@@ -1085,9 +1396,8 @@ def get_domain_tls_daily_reports(
     Groups multiple reports from same day together, like DMARC daily reports
     """
     try:
-        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff_date = utc_naive(datetime.now(timezone.utc) - timedelta(days=days))
         
-        # Query all TLS reports for domain
         reports = db.query(TLSReport).filter(
             and_(
                 TLSReport.policy_domain == domain,
@@ -1095,11 +1405,10 @@ def get_domain_tls_daily_reports(
             )
         ).order_by(TLSReport.start_datetime.desc()).all()
         
-        # Group by date
         daily_data = {}
         for report in reports:
             if report.start_datetime:
-                date_key = report.start_datetime.strftime('%Y-%m-%d')
+                date_key = day_key(report.start_datetime)
                 if date_key not in daily_data:
                     daily_data[date_key] = {
                         'date': date_key,
@@ -1110,7 +1419,6 @@ def get_domain_tls_daily_reports(
                         'reports': []
                     }
                 
-                # Get policies for this report
                 policies = db.query(TLSReportPolicy).filter(
                     TLSReportPolicy.tls_report_id == report.id
                 ).all()
@@ -1129,7 +1437,6 @@ def get_domain_tls_daily_reports(
                     'failed_sessions': report_fail
                 })
         
-        # Convert to list and add success rate
         daily_list = []
         for date_key in sorted(daily_data.keys(), reverse=True):
             data = daily_data[date_key]
@@ -1148,13 +1455,11 @@ def get_domain_tls_daily_reports(
                 'reports': data['reports']
             })
         
-        # Pagination
         total = len(daily_list)
         start_idx = (page - 1) * limit
         end_idx = start_idx + limit
         paginated = daily_list[start_idx:end_idx]
         
-        # Calculate overall totals
         overall_success = sum(d['total_success'] for d in daily_list)
         overall_fail = sum(d['total_fail'] for d in daily_list)
         overall_total = overall_success + overall_fail
@@ -1180,7 +1485,7 @@ def get_domain_tls_daily_reports(
         raise internal_error(e)
 
 
-@router.get("/dmarc/domains/{domain}/tls-reports/{report_date}/details")
+@router.get("/dmarc/domains/{domain}/tls-reports/{report_date}/details", response_model=None, responses=documented(m.TlsDetails, errors={400: None, 404: None, 500: None}))
 def get_tls_report_details(
     domain: str,
     report_date: str,
@@ -1191,22 +1496,19 @@ def get_tls_report_details(
     Shows all reports and policies from that day with breakdown by provider
     """
     try:
-        date_obj = datetime.strptime(report_date, '%Y-%m-%d').date()
-        start_dt = datetime.combine(date_obj, datetime.min.time(), tzinfo=timezone.utc)
-        end_dt = datetime.combine(date_obj, datetime.max.time(), tzinfo=timezone.utc)
-        
+        start_dt, end_dt = day_bounds(datetime.strptime(report_date, '%Y-%m-%d').date())
+
         reports = db.query(TLSReport).filter(
             and_(
                 TLSReport.policy_domain == domain,
                 TLSReport.start_datetime >= start_dt,
-                TLSReport.start_datetime <= end_dt
+                TLSReport.start_datetime < end_dt
             )
         ).all()
         
         if not reports:
             raise HTTPException(status_code=404, detail="No TLS reports found for this date")
         
-        # Aggregate stats
         total_success = 0
         total_fail = 0
         providers = []
@@ -1222,7 +1524,6 @@ def get_tls_report_details(
             total_success += report_success
             total_fail += report_fail
             
-            # Add provider details
             policies_list = []
             for p in policies:
                 policies_list.append({
@@ -1240,8 +1541,8 @@ def get_tls_report_details(
                 'report_id': report.report_id,
                 'organization_name': report.organization_name,
                 'contact_info': report.contact_info,
-                'start_datetime': report.start_datetime.isoformat() if report.start_datetime else None,
-                'end_datetime': report.end_datetime.isoformat() if report.end_datetime else None,
+                'start_datetime': format_datetime_for_api(report.start_datetime),
+                'end_datetime': format_datetime_for_api(report.end_datetime),
                 'successful_sessions': report_success,
                 'failed_sessions': report_fail,
                 'total_sessions': report_success + report_fail,
@@ -1267,29 +1568,27 @@ def get_tls_report_details(
         
     except HTTPException:
         raise
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
     except Exception as e:
         logger.error(f"Error fetching TLS report details for {domain}/{report_date}: {e}")
         raise internal_error(e)
 
 
-# =============================================================================
-# IMAP SYNC STATUS
-# =============================================================================
-
-@router.get("/dmarc/imap/status")
-def get_imap_status(db: Session = Depends(get_db)):
+@router.get("/dmarc/imap/status", response_model=None, responses=documented(m.ImapStatus, errors={500: None}))
+def get_imap_status(request: Request = None, db: Session = Depends(get_db)):
     """
-    Get IMAP sync configuration and status
+    Get IMAP sync configuration and status. The account (host, port, user,
+    folder) and the raw error are Settings: null and a plain sentence for a
+    caller who may not read Settings.
     """
+    account = settings.dmarc_imap_enabled and caller_may(request, "settings", READ)
     try:
-        # Get latest sync
         latest_sync = db.query(DMARCSync).order_by(
             DMARCSync.started_at.desc()
         ).first()
         
-        # Get sync stats (last 24 hours)
-        from datetime import datetime, timedelta
-        twenty_four_hours_ago = datetime.now() - timedelta(hours=24)
+        twenty_four_hours_ago = utc_naive(datetime.now(timezone.utc) - timedelta(hours=24))
         
         recent_syncs = db.query(DMARCSync).filter(
             DMARCSync.started_at >= twenty_four_hours_ago
@@ -1301,10 +1600,10 @@ def get_imap_status(db: Session = Depends(get_db)):
         return {
             'enabled': settings.dmarc_imap_enabled,
             'configuration': {
-                'host': settings.dmarc_imap_host if settings.dmarc_imap_enabled else None,
-                'port': settings.dmarc_imap_port if settings.dmarc_imap_enabled else None,
-                'user': settings.dmarc_imap_user if settings.dmarc_imap_enabled else None,
-                'folder': settings.dmarc_imap_folder if settings.dmarc_imap_enabled else None,
+                'host': settings.dmarc_imap_host if account else None,
+                'port': settings.dmarc_imap_port if account else None,
+                'user': settings.dmarc_imap_user if account else None,
+                'folder': describe_setting(settings.dmarc_imap_folder) if account else None,
                 'delete_after': settings.dmarc_imap_delete_after if settings.dmarc_imap_enabled else None,
                 'interval_seconds': settings.dmarc_imap_interval if settings.dmarc_imap_enabled else None,
                 'interval_minutes': round(settings.dmarc_imap_interval / 60, 1) if settings.dmarc_imap_enabled else None
@@ -1312,15 +1611,15 @@ def get_imap_status(db: Session = Depends(get_db)):
             'latest_sync': {
                 'id': latest_sync.id,
                 'sync_type': latest_sync.sync_type,
-                'started_at': latest_sync.started_at.strftime('%Y-%m-%dT%H:%M:%SZ') if latest_sync.started_at else None,
-                'completed_at': latest_sync.completed_at.strftime('%Y-%m-%dT%H:%M:%SZ') if latest_sync.completed_at else None,
+                'started_at': format_datetime_for_api(latest_sync.started_at),
+                'completed_at': format_datetime_for_api(latest_sync.completed_at),
                 'status': latest_sync.status,
                 'emails_found': latest_sync.emails_found,
                 'emails_processed': latest_sync.emails_processed,
                 'reports_created': latest_sync.reports_created,
                 'reports_duplicate': latest_sync.reports_duplicate,
                 'reports_failed': latest_sync.reports_failed,
-                'error_message': latest_sync.error_message
+                'error_message': job_error(request, latest_sync.error_message)
             } if latest_sync else None,
             'stats_24h': {
                 'total_syncs': len(recent_syncs),
@@ -1334,39 +1633,32 @@ def get_imap_status(db: Session = Depends(get_db)):
         raise internal_error(e)
 
 
-# =============================================================================
-# MANUAL IMAP SYNC
-# =============================================================================
-
-@router.post("/dmarc/imap/sync")
-def trigger_manual_sync(background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+@router.post("/dmarc/imap/sync", response_model=None, dependencies=[Depends(leader.require_leader)], responses=documented(m.ImapSyncStarted, description="Queued, or already running", errors={400: None, 503: None}))
+def trigger_manual_sync(background_tasks: BackgroundTasks):
     """
     Manually trigger IMAP sync and update global job status for UI visibility
     """
     if not settings.dmarc_imap_enabled:
         raise HTTPException(
             status_code=400,
-            detail="DMARC IMAP sync is not enabled."
+            detail="The IMAP import of DMARC and TLS reports is not set up."
         )
-    
-    try:
-        # Cleanup any stuck 'running' status in the specific sync table
-        db.query(DMARCSync).filter(DMARCSync.status == 'running').update({
-            "status": "failed",
-            "error_message": "Interrupted by manual restart"
-        })
-        db.commit()
 
-        # Update the global job status that the UI monitors
-        # This ensures the UI shows "Running" immediately
+    if is_sync_running():
+        return {
+            'status': 'already_running',
+            'message': 'Reports are already being fetched'
+        }
+
+    try:
         update_job_status('dmarc_imap_sync', 'running')
         
-        # We define a wrapper function to handle the background task status
         def manual_sync_wrapper():
             try:
-                # Perform the actual sync
                 result = sync_dmarc_reports_from_imap(sync_type='manual')
                 
+                if result.get('status') == 'already_running':
+                    return
                 if result.get('status') == 'error':
                     update_job_status('dmarc_imap_sync', 'failed', result.get('error_message'))
                 else:
@@ -1375,40 +1667,45 @@ def trigger_manual_sync(background_tasks: BackgroundTasks, db: Session = Depends
                 logger.error(f"Manual sync background error: {e}")
                 update_job_status('dmarc_imap_sync', 'failed', str(e))
 
-        # Trigger the wrapper in background
         background_tasks.add_task(manual_sync_wrapper)
         
         return {
             'status': 'started',
-            'message': 'DMARC IMAP sync started'
+            'message': 'IMAP import of DMARC and TLS reports started'
         }
         
     except Exception as e:
-        db.rollback()
         logger.error(f"Error triggering manual sync: {e}")
-        # If triggering fails, mark job as failed
         update_job_status('dmarc_imap_sync', 'failed', str(e))
         raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
-# =============================================================================
-# IMAP SYNC HISTORY
-# =============================================================================
+def _failure_for(request, item, settings_reader: bool):
+    if not isinstance(item, dict):
+        return item
+    item = dict(item)
+    if 'error' in item:
+        item['error'] = job_error(request, item.get('error'))
+    if not settings_reader:
+        item.pop('folder', None)
+    return item
 
-@router.get("/dmarc/imap/history")
+
+@router.get("/dmarc/imap/history", response_model=None, responses=documented(m.ImapHistory, errors={422: Invalid, 500: None}))
 def get_sync_history(
-    limit: int = 20,
-    page: int = 1,
+    limit: int = Query(20, ge=1, le=500),
+    page: int = Query(1, ge=1),
+    request: Request = None,
     db: Session = Depends(get_db)
 ):
     """
-    Get history of IMAP sync operations
+    Get history of IMAP sync operations. A run's error is a plain sentence for
+    a caller who may not read Settings, and its failures do not name a folder.
     """
+    settings_reader = caller_may(request, "settings", READ)
     try:
-        # Get total count
         total = db.query(DMARCSync).count()
         
-        # Get paginated results
         offset = (page - 1) * limit
         syncs = db.query(DMARCSync).order_by(
             DMARCSync.started_at.desc()
@@ -1424,15 +1721,16 @@ def get_sync_history(
                     'id': sync.id,
                     'sync_type': sync.sync_type,
                     'status': sync.status,
-                    'started_at': sync.started_at.strftime('%Y-%m-%dT%H:%M:%SZ') if sync.started_at else None,
-                    'completed_at': sync.completed_at.strftime('%Y-%m-%dT%H:%M:%SZ') if sync.completed_at else None,
+                    'started_at': format_datetime_for_api(sync.started_at),
+                    'completed_at': format_datetime_for_api(sync.completed_at),
                     'emails_found': sync.emails_found,
                     'emails_processed': sync.emails_processed,
                     'reports_created': sync.reports_created,
                     'reports_duplicate': sync.reports_duplicate,
                     'reports_failed': sync.reports_failed,
-                    'error_message': sync.error_message,
-                    'failed_emails': sync.failed_emails
+                    'error_message': job_error(request, sync.error_message),
+                    'failed_emails': [_failure_for(request, item, settings_reader)
+                                      for item in sync.failed_emails] if sync.failed_emails else sync.failed_emails
                 }
                 for sync in syncs
             ]
@@ -1442,11 +1740,8 @@ def get_sync_history(
         logger.error(f"Error fetching sync history: {e}")
         raise internal_error(e)
 
-# =============================================================================
-# UPLOAD
-# =============================================================================
 
-@router.post("/dmarc/upload")
+@router.post("/dmarc/upload", response_model=None, responses=documented(Union[m.UploadStored, m.UploadDuplicate], description="Stored, or a duplicate of a stored report", errors={400: None, 403: None, 413: None, 422: Invalid, 500: None}))
 async def upload_report(
     file: UploadFile = File(...)
 ):
@@ -1455,7 +1750,7 @@ async def upload_report(
     
     Supported formats:
     - DMARC: .xml, .xml.gz, .zip (XML content)
-    - TLS-RPT: .json, .json.gz
+    - TLS-RPT: .json, .json.gz, .zip (JSON content)
     """
     if not settings.dmarc_manual_upload_enabled:
         raise HTTPException(
@@ -1465,8 +1760,6 @@ async def upload_report(
 
     try:
         from ..services.safe_decompress import MAX_COMPRESSED_BYTES
-        # Read at most the limit + 1 byte so an oversized upload is rejected
-        # without ever buffering the whole file in memory
         file_content = await file.read(MAX_COMPRESSED_BYTES + 1)
         if len(file_content) > MAX_COMPRESSED_BYTES:
             raise HTTPException(
@@ -1482,12 +1775,14 @@ async def upload_report(
         raise internal_error(e)
 
 
+def _is_tls_rpt_upload(file_content: bytes, filename: str) -> bool:
+    return report_kind(filename, file_content) == 'tls-rpt'
+
+
 def _upload_report_worker(file_content: bytes, filename: str):
-    """Own parsing, persistence, rollback, and response construction in one worker."""
     with SessionLocal() as db:
         try:
-            name = filename.lower()
-            if name.endswith(('.json', '.json.gz', '.json.zip')):
+            if _is_tls_rpt_upload(file_content, filename):
                 return _upload_tls_rpt_report(file_content, filename, db)
             return _upload_dmarc_report(file_content, filename, db)
         except Exception:
@@ -1495,111 +1790,43 @@ def _upload_report_worker(file_content: bytes, filename: str):
             raise
 
 
-def _upload_dmarc_report(file_content: bytes, filename: str, db: Session):
-    """Handle DMARC report upload"""
-    parsed_data = parse_dmarc_file(file_content, filename)
-    
-    if not parsed_data:
-        raise HTTPException(status_code=400, detail="Failed to parse DMARC report")
-    
-    records_data = parsed_data.pop('records', [])
-    report_data = parsed_data
-    
-    existing = db.query(DMARCReport).filter(
-        DMARCReport.report_id == report_data['report_id']
-    ).first()
-    
-    if existing:
+def _upload_report(kind: str, file_content: bytes, filename: str, db: Session):
+    label = 'DMARC' if kind == 'dmarc' else 'TLS-RPT'
+    try:
+        prepared = prepare_report_file(kind, file_content, filename)
+        if prepared is not None:
+            ReportBudget().add(prepared.items, prepared.size)
+    except ReportRejectedError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if prepared is None:
+        raise HTTPException(status_code=400, detail=f"Failed to parse {label} report")
+
+    status, report = store_report(db, prepared)
+    db.commit()
+    if status == 'duplicate':
         return {
             'status': 'duplicate',
-            'report_type': 'dmarc',
-            'message': f'Report {report_data["report_id"]} already exists'
+            'report_type': kind,
+            'message': f'{label} report {prepared.report_id} from {report_sender(report)} is already stored'
         }
-    
-    report = DMARCReport(**report_data)
-    db.add(report)
-    db.flush()
-    
-    for record_data in records_data:
-        record_data['dmarc_report_id'] = report.id
-        enriched = enrich_dmarc_record(record_data)
-        record = DMARCRecord(**enriched)
-        db.add(record)
-    
-    db.commit()
-    
-    # Clear cache
     clear_dmarc_cache(db)
-    
-    return {
+
+    domain = report.domain if kind == 'dmarc' else report.policy_domain
+    response = {
         'status': 'success',
-        'report_type': 'dmarc',
-        'message': f'Uploaded DMARC report for {report.domain} from {report.org_name}',
+        'report_type': kind,
+        'message': f'Uploaded {label} report for {domain} from {report_sender(report)}',
         'report_id': report.id,
-        'records_count': len(records_data)
     }
+    if status == 'conflict':
+        response['message'] += '. Another report has the same report ID and different content'
+    response['records_count' if kind == 'dmarc' else 'policies_count'] = len(prepared.children)
+    return response
+
+
+def _upload_dmarc_report(file_content: bytes, filename: str, db: Session):
+    return _upload_report('dmarc', file_content, filename, db)
 
 
 def _upload_tls_rpt_report(file_content: bytes, filename: str, db: Session):
-    """Handle TLS-RPT report upload"""
-    from ..services.tls_rpt_parser import parse_tls_rpt_file
-    
-    parsed_data = parse_tls_rpt_file(file_content, filename)
-    
-    if not parsed_data:
-        raise HTTPException(status_code=400, detail="Failed to parse TLS-RPT report")
-    
-    # Extract policies
-    policies_data = parsed_data.pop('policies', [])
-    
-    # Check for duplicate
-    existing = db.query(TLSReport).filter(
-        TLSReport.report_id == parsed_data['report_id']
-    ).first()
-    
-    if existing:
-        return {
-            'status': 'duplicate',
-            'report_type': 'tls-rpt',
-            'message': f'TLS-RPT report {parsed_data["report_id"]} already exists'
-        }
-    
-    # Create TLS report
-    tls_report = TLSReport(
-        report_id=parsed_data['report_id'],
-        organization_name=parsed_data.get('organization_name', 'Unknown'),
-        contact_info=parsed_data.get('contact_info', ''),
-        policy_domain=parsed_data['policy_domain'],
-        start_datetime=parsed_data['start_datetime'],
-        end_datetime=parsed_data['end_datetime'],
-        raw_json=parsed_data.get('raw_json', '')
-    )
-    db.add(tls_report)
-    db.flush()
-    
-    # Create policy records
-    for policy_data in policies_data:
-        policy = TLSReportPolicy(
-            tls_report_id=tls_report.id,
-            policy_type=policy_data.get('policy_type', 'unknown'),
-            policy_domain=policy_data.get('policy_domain', ''),
-            policy_string=policy_data.get('policy_string', []),
-            mx_host=policy_data.get('mx_host', []),
-            successful_session_count=policy_data.get('successful_session_count', 0),
-            failed_session_count=policy_data.get('failed_session_count', 0),
-            failure_details=policy_data.get('failure_details', [])
-        )
-        db.add(policy)
-    
-    db.commit()
-    
-    # Clear cache
-    clear_dmarc_cache(db)
-    
-    return {
-        'status': 'success',
-        'report_type': 'tls-rpt',
-        'message': f'Uploaded TLS-RPT report for {tls_report.policy_domain} from {tls_report.organization_name}',
-        'report_id': tls_report.id,
-        'policies_count': len(policies_data)
-    }
+    return _upload_report('tls-rpt', file_content, filename, db)

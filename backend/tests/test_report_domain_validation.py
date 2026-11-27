@@ -1,8 +1,3 @@
-"""
-Reports arrive from outside, so their domain fields must be plain domain
-names before they are stored; and the feature list saved from Settings
-accepts only known features.
-"""
 import json
 
 import pytest
@@ -29,7 +24,7 @@ def test_a_dmarc_report_with_an_invalid_domain_is_not_parsed():
     report = VALID_REPORT.replace("<domain>example.com</domain>\n    <adkim>", "<domain>example.com'x</domain>\n    <adkim>")
     assert report != VALID_REPORT
     with pytest.raises(ValueError):
-        parse_dmarc_xml(report, report)
+        parse_dmarc_xml(report)
 
 
 def _tls_report(domain):

@@ -1,11 +1,3 @@
-"""
-SMTP Abuse Protection API - status, whitelist management, manual controls.
-
-Endpoints that only touch the database are plain ``def`` (FastAPI runs them in
-its threadpool); endpoints that call the mailcow API are ``async`` and keep
-their database work in worker threads. See services/smtp_abuse_service.py for
-the logic.
-"""
 import asyncio
 import logging
 import re
@@ -18,26 +10,21 @@ from ..config import settings
 from ..mailcow_api import mailcow_api
 from ..services import smtp_abuse_service as svc
 from ..utils import internal_error
+from ..api_models import Invalid, documented
+from ..api_models import security as m
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/smtp-abuse")
 
-# Bounded quantifiers keep the match linear: the original
-# ^[^@\s]+@[^@\s]+\.[^@\s]+$ let the two + classes overlap on the dot, so a
-# long non-matching local part backtracked quadratically and stalled the event
-# loop. The lengths follow RFC 5321 (64-octet local part, 63-octet labels).
 _EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s.]{1,63}(?:\.[^@\s.]{1,63})+$")
 
-# RFC 5321 caps a path at 256 octets; reject longer input before matching.
 _MAX_EMAIL_LENGTH = 254
 
-# Upper bound on a bulk whitelist replace, so one request cannot pin a worker.
 _MAX_WHITELIST_ENTRIES = 5000
 
 
 def is_valid_email(value: str) -> bool:
-    """Length-capped email syntax check (single source of truth for the API)."""
     return len(value) <= _MAX_EMAIL_LENGTH and _EMAIL_RE.match(value) is not None
 
 
@@ -59,26 +46,22 @@ class WhitelistBulkRequest(BaseModel):
 
 
 def require_control_access() -> None:
-    """Write operations need the feature on and a Read-Write mailcow key."""
     if not settings.smtp_abuse_enabled:
-        raise HTTPException(status_code=403, detail="SMTP abuse protection is disabled")
+        raise HTTPException(status_code=403, detail="Outgoing spam is off. Enable it in Security > Settings > Outgoing spam.")
     if not mailcow_api.has_rw_key:
-        raise HTTPException(status_code=503, detail="MAILCOW_API_KEY_RW is required")
+        raise HTTPException(status_code=503, detail="Add a read-write API key in Settings > mailcow > Connection.")
 
 
-@router.get("/status")
+@router.get("/status", responses=documented(m.AbuseStatusResponse, errors={422: Invalid, 500: None}))
 async def get_status(limit: int = Query(200, ge=1, le=1000)):
     """Current outbound activity, block states and whitelist."""
     try:
-        # SMTP access state per mailbox (best effort - the panel still works
-        # without it, just without the open/closed column)
         mailbox_access = {}
         try:
             for mailbox in await mailcow_api.get_mailboxes():
                 address = mailbox.get("username")
                 if not address:
                     continue
-                # Some mailcow versions nest the flags under `attributes`
                 attributes = mailbox.get("attributes") or {}
                 access = mailbox.get("smtp_access", attributes.get("smtp_access", 1))
                 mailbox_access[svc.normalize(address)] = not (
@@ -94,8 +77,6 @@ async def get_status(limit: int = Query(200, ge=1, le=1000)):
         latest_actions = await asyncio.to_thread(svc.fetch_latest_actions)
 
         whitelist = {e["email"] for e in whitelist_entries}
-        # Only mailboxes THIS system blocked count as abuse cases - an
-        # incoming-only mailbox (e.g. a DMARC report inbox) also has SMTP off.
         blocked_by_us = {
             email for email, a in latest_actions.items() if a.get("action") == "blocked"
         }
@@ -105,7 +86,6 @@ async def get_status(limit: int = Query(200, ge=1, le=1000)):
         for email in emails:
             count = counts.get(email, 0)
             smtp_open = mailbox_access.get(email, True)
-            # Hide mailboxes that simply have SMTP disabled by configuration
             if not smtp_open and email not in blocked_by_us:
                 continue
             mailboxes.append({
@@ -125,6 +105,7 @@ async def get_status(limit: int = Query(200, ge=1, le=1000)):
             "threshold": settings.smtp_abuse_threshold,
             "window_minutes": settings.smtp_abuse_window_minutes,
             "unblock_grace_minutes": settings.smtp_abuse_unblock_grace_minutes,
+            "revoke_app_passwords": settings.smtp_abuse_revoke_app_passwords,
             "mailboxes": mailboxes,
             "whitelist": sorted(whitelist),
         }
@@ -133,7 +114,7 @@ async def get_status(limit: int = Query(200, ge=1, le=1000)):
         raise internal_error(e)
 
 
-@router.get("/whitelist")
+@router.get("/whitelist", responses=documented(List[m.WhitelistEntry], errors={500: None}))
 def get_whitelist():
     """Active whitelist entries."""
     try:
@@ -143,7 +124,7 @@ def get_whitelist():
         raise internal_error(e)
 
 
-@router.post("/whitelist")
+@router.post("/whitelist", responses=documented(m.WhitelistChange, errors={403: None, 422: Invalid, 500: None, 503: None}))
 def add_whitelist(request: WhitelistRequest):
     """Add (or re-activate) a single whitelist entry."""
     require_control_access()
@@ -155,14 +136,14 @@ def add_whitelist(request: WhitelistRequest):
         raise internal_error(e)
 
 
-@router.put("/whitelist")
+@router.put("/whitelist", responses=documented(m.WhitelistReplaced, errors={403: None, 422: Invalid, 500: None, 503: None}))
 def replace_whitelist(request: WhitelistBulkRequest):
     """Replace the whole whitelist (one address per line in the UI)."""
     require_control_access()
     if len(request.emails) > _MAX_WHITELIST_ENTRIES:
         raise HTTPException(
             status_code=422,
-            detail=f"Too many entries: the whitelist holds at most {_MAX_WHITELIST_ENTRIES} addresses",
+            detail=f"The allowlist holds at most {_MAX_WHITELIST_ENTRIES} addresses. Remove extra entries and try again.",
         )
     emails = []
     for value in request.emails:
@@ -170,7 +151,7 @@ def replace_whitelist(request: WhitelistBulkRequest):
         if not email:
             continue
         if not is_valid_email(email):
-            raise HTTPException(status_code=422, detail=f"Invalid email format: {value}")
+            raise HTTPException(status_code=422, detail=f"Invalid mailbox address: {value}. Enter a full address, such as user@example.com.")
         emails.append(email)
     try:
         active = svc.set_whitelist(emails)
@@ -180,13 +161,13 @@ def replace_whitelist(request: WhitelistBulkRequest):
         raise internal_error(e)
 
 
-@router.delete("/whitelist/{email}")
+@router.delete("/whitelist/{email}", responses=documented(m.WhitelistChange, errors={403: None, 404: None, 500: None, 503: None}))
 def remove_whitelist(email: str):
     """Deactivate a whitelist entry."""
     require_control_access()
     try:
         if not svc.deactivate_whitelist_entry(email):
-            raise HTTPException(status_code=404, detail="Email is not on the whitelist")
+            raise HTTPException(status_code=404, detail="This mailbox is no longer on the allowlist. Reload the list.")
         return {"email": svc.normalize(email), "active": False}
     except HTTPException:
         raise
@@ -195,7 +176,7 @@ def remove_whitelist(email: str):
         raise internal_error(e)
 
 
-@router.post("/mailboxes/{email}/block")
+@router.post("/mailboxes/{email}/block", responses=documented(m.BlockResult, errors={403: None, 500: None, 502: None, 503: None}))
 async def manual_block(email: str):
     """Disable SMTP for a mailbox now."""
     require_control_access()
@@ -210,7 +191,7 @@ async def manual_block(email: str):
         raise internal_error(e)
 
 
-@router.post("/mailboxes/{email}/unblock")
+@router.post("/mailboxes/{email}/unblock", responses=documented(m.BlockResult, errors={403: None, 500: None, 502: None, 503: None}))
 async def manual_unblock(email: str):
     """Re-enable SMTP for a mailbox (starts the auto-block grace period)."""
     require_control_access()
@@ -221,7 +202,7 @@ async def manual_unblock(email: str):
         raise internal_error(e)
 
 
-@router.get("/history")
+@router.get("/history", responses=documented(List[m.AbuseAction], errors={422: Invalid, 500: None}))
 def get_history(limit: int = Query(50, ge=1, le=500)):
     """Recent block/unblock actions (audit trail)."""
     from ..database import get_db_context

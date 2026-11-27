@@ -1,4 +1,3 @@
-"""Blacklist scan database stages must leave the request loop responsive."""
 import asyncio
 import threading
 from contextlib import contextmanager

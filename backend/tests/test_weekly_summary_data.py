@@ -1,10 +1,3 @@
-"""Issue #81: the weekly summary crashed with
-"object dict can't be used in 'await' expression".
-
-get_monitored_hosts() became a plain function in v2.7.0 but
-reporting.get_system_summary_data() still awaited it, so every weekly
-summary (scheduled or on demand) failed before sending anything.
-"""
 import ast
 import asyncio
 import inspect
@@ -21,9 +14,6 @@ from app.routers import reporting  # noqa: E402
 
 
 def test_every_awaited_helper_in_reporting_is_a_coroutine_function():
-    """Structural guard: any name reporting.py awaits directly must be async.
-    A helper that is turned into a sync function (as in #81) fails here with
-    a message naming it, without needing a database."""
     source = pathlib.Path(reporting.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
     awaited_names = set()
@@ -38,15 +28,13 @@ def test_every_awaited_helper_in_reporting_is_a_coroutine_function():
     for name in sorted(awaited_names):
         obj = getattr(reporting, name, None)
         if obj is None:
-            continue  # imported inside a function body; not resolvable here
+            continue
         if not inspect.iscoroutinefunction(obj):
             wrong.append(name)
     assert not wrong, f"reporting.py awaits non-async helpers: {wrong}"
 
 
 def test_system_summary_data_builds_with_sync_blacklist_helper(monkeypatch):
-    """Behavioural guard: the summary aggregates the blacklist section from
-    the sync get_monitored_hosts() result instead of crashing."""
     def fake_mailbox_summary(date_range, db):
         return {"total_messages": 1}
 
@@ -89,3 +77,14 @@ def test_system_summary_data_builds_with_sync_blacklist_helper(monkeypatch):
     assert data["blacklist"]["listed_count"] == 1
     assert data["blacklist"]["total_hosts"] == 2
     assert data["top_failures"][0]["username"] == "a@example.com"
+    assert data["queue"] == {"count": 0} and data["quarantine"] == {"count": 0}
+
+    async def no_answer():
+        raise mailcow_api_module.MailcowAPIError("no answer")
+    monkeypatch.setattr(mailcow_api_module.mailcow_api, "get_queue", no_answer)
+    data = asyncio.run(reporting.get_system_summary_data())
+    assert data["queue"] == {"count": None} and data["quarantine"] == {"count": 0}
+    monkeypatch.setattr(mailcow_api_module.mailcow_api, "get_queue", fake_list)
+    monkeypatch.setattr(mailcow_api_module.mailcow_api, "get_quarantine", no_answer)
+    data = asyncio.run(reporting.get_system_summary_data())
+    assert data["queue"] == {"count": 0} and data["quarantine"] == {"count": None}

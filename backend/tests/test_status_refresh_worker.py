@@ -1,4 +1,3 @@
-"""Status refresh owns its database session in a worker."""
 import asyncio
 import threading
 from contextlib import contextmanager
@@ -6,6 +5,7 @@ from unittest.mock import Mock
 
 
 from app import scheduler
+from app.services import correlation_jobs
 
 
 def test_status_refresh_leaves_event_loop_responsive(monkeypatch):
@@ -14,7 +14,7 @@ def test_status_refresh_leaves_event_loop_responsive(monkeypatch):
     db = Mock()
     query = db.query.return_value.filter.return_value.limit.return_value
     query.all.return_value = [Mock(id=1)]
-    monkeypatch.setattr(scheduler, "_recompute_correlation_from_postfix", lambda db, row: True)
+    monkeypatch.setattr(correlation_jobs, "recompute_correlation_from_postfix", lambda db, row: True)
     db.commit.side_effect = lambda: threads.append(threading.get_ident())
     @contextmanager
     def session():
@@ -26,8 +26,8 @@ def test_status_refresh_leaves_event_loop_responsive(monkeypatch):
         finally:
             threads.append(threading.get_ident())
             finished.set()
-    monkeypatch.setattr(scheduler, "get_db_context", session)
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(correlation_jobs, "get_db_context", session)
+    monkeypatch.setitem(scheduler.job_status, "update_final_status", {})
     async def run():
         loop_thread = threading.get_ident()
         task = asyncio.create_task(scheduler.update_final_status_for_correlations())
@@ -48,8 +48,8 @@ def test_status_refresh_reports_database_failure(monkeypatch):
     def session():
         raise RuntimeError("fixture database failure")
         yield
-    monkeypatch.setattr(scheduler, "get_db_context", session)
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(correlation_jobs, "get_db_context", session)
+    monkeypatch.setitem(scheduler.job_status, "update_final_status", {})
     asyncio.run(scheduler.update_final_status_for_correlations())
     assert scheduler.job_status["update_final_status"]["status"] == "failed"
     assert scheduler.job_status["update_final_status"]["error"] == "fixture database failure"

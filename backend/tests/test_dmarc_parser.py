@@ -1,4 +1,3 @@
-"""Tests for the DMARC aggregate report parser."""
 import gzip
 import io
 import zipfile
@@ -6,6 +5,7 @@ import zipfile
 import pytest
 
 from app.services.dmarc_parser import parse_dmarc_file, parse_dmarc_xml
+from app.services.report_identity import ReportLimitError
 
 VALID_REPORT = """<?xml version="1.0"?>
 <feedback>
@@ -37,7 +37,7 @@ VALID_REPORT = """<?xml version="1.0"?>
 
 
 def test_parse_valid_xml():
-    parsed = parse_dmarc_xml(VALID_REPORT, VALID_REPORT)
+    parsed = parse_dmarc_xml(VALID_REPORT)
     assert parsed["org_name"] == "google.com"
     assert parsed["domain"] == "example.com"
     assert parsed["report_id"] == "1234567890"
@@ -50,13 +50,12 @@ def test_parse_valid_xml():
 
 
 def test_entity_expansion_blocked():
-    """defusedxml must reject XML with internal entity definitions (billion laughs)."""
     evil = (
         '<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol">'
         '<!ENTITY lol2 "&lol;&lol;&lol;">]><feedback>&lol2;</feedback>'
     )
     with pytest.raises(Exception):
-        parse_dmarc_xml(evil, evil)
+        parse_dmarc_xml(evil)
 
 
 def test_parse_gz_file_end_to_end():
@@ -74,14 +73,16 @@ def test_parse_zip_file_end_to_end():
     assert result["domain"] == "example.com"
 
 
-def test_gzip_bomb_returns_none():
+def test_gzip_bomb_is_rejected_as_over_the_limit():
     bomb = gzip.compress(b"\x00" * (60 * 1024 * 1024))
-    assert parse_dmarc_file(bomb, "bomb.xml.gz") is None
+    with pytest.raises(ReportLimitError):
+        parse_dmarc_file(bomb, "bomb.xml.gz")
 
 
-def test_oversized_compressed_input_returns_none():
-    big = b"\x00" * (11 * 1024 * 1024)  # over the 10 MB compressed cap
-    assert parse_dmarc_file(big, "big.xml.gz") is None
+def test_oversized_compressed_input_is_rejected_as_over_the_limit():
+    big = b"\x00" * (11 * 1024 * 1024)
+    with pytest.raises(ReportLimitError):
+        parse_dmarc_file(big, "big.xml.gz")
 
 
 def test_unsupported_extension_returns_none():
@@ -90,4 +91,27 @@ def test_unsupported_extension_returns_none():
 
 def test_missing_metadata_raises():
     with pytest.raises(Exception):
-        parse_dmarc_xml("<feedback></feedback>", "<feedback></feedback>")
+        parse_dmarc_xml("<feedback></feedback>")
+
+
+def test_parse_plain_xml_file():
+    result = parse_dmarc_file(VALID_REPORT.encode(), "example.net!example.com!1700000000!1700086400.xml")
+    assert result is not None
+    assert result["report_id"] == "1234567890"
+
+
+def test_plain_xml_with_byte_order_mark():
+    result = parse_dmarc_file(b"\xef\xbb\xbf" + VALID_REPORT.encode(), "report.xml")
+    assert result is not None
+
+
+@pytest.mark.parametrize("name", ["REPORT.XML.GZ", "report.gz", "report"])
+def test_gzip_is_read_whatever_its_name(name):
+    assert parse_dmarc_file(gzip.compress(VALID_REPORT.encode()), name) is not None
+
+
+def test_zip_is_read_whatever_its_name():
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("REPORT.XML", VALID_REPORT)
+    assert parse_dmarc_file(buf.getvalue(), "Report.ZIP") is not None

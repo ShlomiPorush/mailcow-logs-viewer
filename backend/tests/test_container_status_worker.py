@@ -1,4 +1,3 @@
-"""Container status database work must not block either HTTP entry point."""
 import asyncio
 import threading
 from contextlib import contextmanager
@@ -60,7 +59,7 @@ def test_container_http_is_responsive(monkeypatch, path, stage):
                 response = await task
         assert response.status_code == 200, response.text
         data = response.json()
-        assert data["summary" if path == "containers" else "containers"] == {"running": 1, "stopped": 2, "total": 3}
+        assert data["summary" if path == "containers" else "containers"] == {"running": 1, "stopped": 2, "total": 3, "ignored": 0}
         assert threads and all(t != loop_thread for t in threads)
         if path == "containers":
             assert data["containers"]["missing-mailcow"]["state"] == "stopped"

@@ -1,15 +1,13 @@
-// =============================================================================
-// EXPORT CSV
-// =============================================================================
-
 async function exportCSV(type) {
     try {
-        const filters = currentFilters[type] || {};
+        const filters = type === 'messages' && typeof messagesRangeFilters === 'function'
+            ? messagesRangeFilters(currentFilters.messages || {}) : currentFilters[type] || {};
         const params = new URLSearchParams();
         for (const [key, value] of Object.entries(filters)) {
             if (value == null || (typeof value === 'string' && !value.trim())) continue;
             params.set(key, value);
         }
+        if (type === 'messages' && typeof messagesOrder !== 'undefined' && messagesOrder === 'asc') params.set('order', 'asc');
 
         const response = await authenticatedFetch(`/api/export/${type}/csv?${params}`, { method: 'HEAD' });
         if (!response.ok) {
@@ -23,8 +21,6 @@ async function exportCSV(type) {
         if (response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'text/csv') {
             throw new Error('Could not export CSV. Refresh the page and try again.');
         }
-        // The browser streams the file directly to its download manager.
-        // Failures after this preflight are handled by the browser.
         const link = document.createElement('a');
         link.href = `/api/export/${type}/csv?${params}`;
         link.download = '';
@@ -34,6 +30,6 @@ async function exportCSV(type) {
         showToast('Download started.', 'success');
     } catch (error) {
         console.error('Failed to export CSV:', error);
-        showToast(error.message || 'Could not export CSV. Please try again.', 'error');
+        showToast(uiErrorText(error), 'error');
     }
 }

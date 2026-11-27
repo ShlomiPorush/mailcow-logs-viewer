@@ -1,22 +1,15 @@
-"""
-Notification channels - built-in support for common alert destinations.
-
-Each channel type declares the fields it actually needs (a Slack channel asks
-for its incoming-webhook URL, Telegram asks for a bot token and chat ID, ntfy
-asks for a server and topic). The full endpoint URL is assembled here, so the
-user never has to hand-craft one.
-
-Multiple channels can be enabled at once. Each channel subscribes to the alert
-topics it cares about (see ALERT_TYPES); a channel with no subscription list
-receives everything.
-Synchronous (requests) - call from a worker thread, never on the event loop.
-"""
+import asyncio
+import codecs
+import contextlib
 import logging
+import os
+import re
+import ssl
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse
 
-import requests
+import httpx
 
 from ..database import get_db_context
 from ..models import NotificationChannel
@@ -24,33 +17,35 @@ from ..models import NotificationChannel
 logger = logging.getLogger(__name__)
 
 _TIMEOUT_SECONDS = 10
-# Discord's hard limit is 2000 characters; stay comfortably below it
+_TOTAL_SECONDS = 20
+_MAX_ERROR_BYTES = 1024
+_TOO_SLOW = "The destination took too long to respond. Try sending a test again."
+_UNREADABLE_URL = "Could not send the notification. Check the destination URL and credentials."
+_UNEXPECTED = "The send failed with an unexpected error. Check the application logs."
+_MIN_CUT_SECRET = 4
 _MAX_MESSAGE_CHARS = 1900
 
 
-# The alert topics a channel can subscribe to. Every notification the app
-# sends belongs to exactly one of these, so the settings UI can show what a
-# destination will actually receive.
 ALERT_TYPES: List[Dict] = [
     {
         "id": "security",
         "label": "Security",
-        "description": "Compromised mailbox detected, authentication attacks, SMTP disabled by abuse protection",
+        "description": "Unusual sending, login attacks, and blocked mailbox sending.",
     },
     {
         "id": "blacklist",
-        "label": "IP blacklist",
-        "description": "Your server IP was listed on a spam blacklist, or is listed no more",
+        "label": "Blocklists",
+        "description": "Sending IPs added to or removed from blocklists.",
     },
     {
         "id": "dns_changes",
         "label": "DNS record changes",
-        "description": "A domain SPF, DKIM, DMARC, TLSA, MTA-STS or TLS-RPT record changed, DNSSEC stopped validating, or DANE broke",
+        "description": "Changed DNS records, failed DNSSEC validation, or TLSA certificate mismatches.",
     },
     {
         "id": "dmarc_errors",
-        "label": "DMARC processing errors",
-        "description": "A DMARC report could not be imported or parsed",
+        "label": "Report import errors",
+        "description": "DMARC or TLS reports that could not be imported.",
     },
 ]
 
@@ -58,32 +53,25 @@ ALERT_TYPE_IDS = {t["id"] for t in ALERT_TYPES}
 
 
 def channel_wants(channel_alert_types, alert_type: Optional[str]) -> bool:
-    """Should this channel receive an alert of this type?
-
-    An empty/missing subscription list means "everything", so channels created
-    before topics existed keep receiving all alerts.
-    """
     if not channel_alert_types:
         return True
     if not alert_type:
-        return True          # untyped notification (e.g. a manual test)
+        return True
     return alert_type in channel_alert_types
 
 
-# Field specs drive the settings UI: only these fields are shown per type.
-# secret=True fields are masked once saved.
 CHANNEL_TYPES: Dict[str, Dict] = {
     "slack": {
         "label": "Slack",
-        "help": "Create an Incoming Webhook in your Slack workspace (Apps -> Incoming Webhooks) and paste the URL.",
+        "help": "Paste an incoming webhook URL from your Slack workspace.",
         "fields": [
-            {"key": "webhook_url", "label": "Incoming Webhook URL", "type": "url", "required": True,
+            {"key": "webhook_url", "label": "Incoming webhook URL", "type": "url", "required": True,
              "secret": True, "placeholder": "https://hooks.slack.com/services/T000/B000/XXXX"},
         ],
     },
     "discord": {
         "label": "Discord",
-        "help": "In your Discord channel: Edit Channel -> Integrations -> Webhooks -> New Webhook, then copy the URL.",
+        "help": "Paste a webhook URL from Discord > Edit Channel > Integrations > Webhooks.",
         "fields": [
             {"key": "webhook_url", "label": "Webhook URL", "type": "url", "required": True,
              "secret": True, "placeholder": "https://discord.com/api/webhooks/..."},
@@ -91,17 +79,20 @@ CHANNEL_TYPES: Dict[str, Dict] = {
     },
     "telegram": {
         "label": "Telegram",
-        "help": "Create a bot with @BotFather to get the token, then message your bot and use @userinfobot to find your chat ID.",
+        "help": "Enter your bot token and the chat ID that should receive alerts. For a direct chat, message your bot first. For a group topic, enter its Topic ID.",
         "fields": [
             {"key": "bot_token", "label": "Bot token", "type": "text", "required": True,
              "secret": True, "placeholder": "123456789:AAExample-Token"},
             {"key": "chat_id", "label": "Chat ID", "type": "text", "required": True,
              "placeholder": "123456789 or -100123456789 for a group"},
+            {"key": "message_thread_id", "label": "Topic ID", "type": "text", "required": False,
+             "integer": True, "placeholder": "42",
+             "hint": "Copy the topic link in Telegram and use its last number, for example 42 in t.me/c/1234567890/42."},
         ],
     },
     "ntfy": {
         "label": "ntfy",
-        "help": "Use the public server (ntfy.sh) or your own. The topic is the channel name you subscribe to in the app.",
+        "help": "Use a topic you subscribe to in ntfy.",
         "fields": [
             {"key": "server_url", "label": "Server URL", "type": "url", "required": False,
              "default": "https://ntfy.sh", "placeholder": "https://ntfy.sh"},
@@ -123,7 +114,7 @@ CHANNEL_TYPES: Dict[str, Dict] = {
     },
     "webhook": {
         "label": "Custom webhook (JSON)",
-        "help": "Any endpoint that accepts a JSON POST - n8n, Home Assistant, your own script.",
+        "help": "Use an endpoint that accepts JSON POST requests.",
         "fields": [
             {"key": "url", "label": "Endpoint URL", "type": "url", "required": True,
              "placeholder": "https://example.com/hook"},
@@ -145,31 +136,63 @@ def _truncate(text: str, limit: int = _MAX_MESSAGE_CHARS) -> str:
     return text if len(text) <= limit else text[:limit - 1] + "..."
 
 
+def _readable_url(value: str) -> bool:
+    try:
+        parsed = urlparse(value)
+        parsed.port
+    except ValueError:
+        return False
+    return parsed.scheme.lower() in ("http", "https") and bool(parsed.hostname)
+
+
 def validate_config(channel_type: str, config: Dict) -> Tuple[bool, str]:
-    """Check that all required fields for this type are present."""
     spec = CHANNEL_TYPES.get(channel_type)
     if not spec:
-        return False, f"Unknown channel type: {channel_type}"
+        return False, f"Unknown destination service: {channel_type}. Select a service from the list."
     for field in spec["fields"]:
         if field.get("required") and not str(config.get(field["key"], "")).strip():
-            return False, f"{field['label']} is required"
+            return False, f"Enter {field['label']}."
+        value = str(config.get(field["key"]) or "").strip()
+        if field.get("type") == "url" and value and not _readable_url(value):
+            return False, f"{field['label']} is not a valid URL. Enter the full address, starting with https://"
+        if field.get("integer") and value and not (value.isascii() and value.isdigit()):
+            return False, f"{field['label']} must be a whole number, such as 42"
     return True, ""
 
 
+def _slack_text(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+_DISCORD_MASS_MENTION = re.compile(r"@(everyone|here)", re.IGNORECASE)
+_ZERO_WIDTH_SPACE = "\u200b"
+
+
+def _discord_text(text: str) -> str:
+    text = _DISCORD_MASS_MENTION.sub(rf"@{_ZERO_WIDTH_SPACE}\1", text)
+    return text.replace("](", f"]{_ZERO_WIDTH_SPACE}(")
+
+
 def build_request(channel_type: str, config: Dict, subject: str, message: str) -> Tuple[str, Dict]:
-    """Assemble (url, requests-kwargs) for a channel. URLs are built here so
-    the user only supplies the service-specific pieces."""
     text = _truncate(message)
 
     if channel_type == "slack":
-        return config["webhook_url"], {"json": {"text": f"*{subject}*\n{text}"}}
+        return config["webhook_url"], {"json": {
+            "text": _truncate(f"*{_slack_text(subject)}*\n{_slack_text(message)}")}}
 
     if channel_type == "discord":
-        return config["webhook_url"], {"json": {"content": _truncate(f"**{subject}**\n{text}")}}
+        return config["webhook_url"], {"json": {
+            "content": _truncate(f"**{_discord_text(subject)}**\n{_discord_text(message)}"),
+            "allowed_mentions": {"parse": []},
+        }}
 
     if channel_type == "telegram":
         url = f"https://api.telegram.org/bot{config['bot_token']}/sendMessage"
-        return url, {"json": {"chat_id": config["chat_id"], "text": f"{subject}\n\n{text}"}}
+        payload = {"chat_id": config["chat_id"], "text": f"{subject}\n\n{text}"}
+        topic = str(config.get("message_thread_id") or "").strip()
+        if topic:
+            payload["message_thread_id"] = int(topic)
+        return url, {"json": payload}
 
     if channel_type == "ntfy":
         server = (config.get("server_url") or "https://ntfy.sh").rstrip("/")
@@ -177,9 +200,7 @@ def build_request(channel_type: str, config: Dict, subject: str, message: str) -
         headers = {"Priority": "default"}
         if config.get("token"):
             headers["Authorization"] = f"Bearer {config['token']}"
-        # Title goes as a query parameter: HTTP headers can't carry the emoji
-        # some alert subjects use, ?title= takes percent-encoded UTF-8
-        return url, {"data": text.encode("utf-8"), "headers": headers,
+        return url, {"content": text.encode("utf-8"), "headers": headers,
                      "params": {"title": subject}}
 
     if channel_type == "gotify":
@@ -187,7 +208,6 @@ def build_request(channel_type: str, config: Dict, subject: str, message: str) -
         url = f"{server}/message?token={config['app_token']}"
         return url, {"json": {"title": subject, "message": text, "priority": 5}}
 
-    # custom webhook
     headers = {}
     if config.get("auth_header"):
         headers["Authorization"] = config["auth_header"]
@@ -203,37 +223,129 @@ def build_request(channel_type: str, config: Dict, subject: str, message: str) -
 
 
 def _sanitize_error(channel_type: str, config: Dict, error_text: str) -> str:
-    """Strip channel secrets from an error string before it is logged, stored
-    in last_error, or returned by the API. requests embeds the target URL in
-    its exception messages, and for Telegram/Gotify/Slack/Discord the URL (or
-    its path) contains the token."""
+    secrets = []
     for key in SECRET_FIELDS.get(channel_type, set()):
         value = str(config.get(key, "") or "").strip()
         if not value:
             continue
-        error_text = error_text.replace(value, MASK)
-        if value.startswith("http"):
-            # ConnectionError messages quote only the path part of the URL
-            path = urlparse(value).path
+        secrets.append(value)
+        if value.lower().startswith("http"):
+            try:
+                parsed = urlparse(value)
+            except ValueError:
+                return _UNREADABLE_URL
+            path, query = parsed.path, parsed.query
             if path and len(path) > 1:
-                error_text = error_text.replace(path, "/" + MASK)
-    return error_text
+                secrets.append(path)
+            if query:
+                secrets += [f"{path}?{query}", query]
+    return _mask(error_text, secrets)
+
+
+def _mask(text: str, secrets: List[str]) -> str:
+    spans = []
+    for secret in filter(None, secrets):
+        start = text.find(secret)
+        while start != -1:
+            spans.append((start, start + len(secret)))
+            start = text.find(secret, start + 1)
+        for length in range(len(secret) - 1, _MIN_CUT_SECRET - 1, -1):
+            if text.endswith(secret[:length]):
+                spans.append((len(text) - length, len(text)))
+                break
+    if not spans:
+        return text
+    merged = []
+    for start, end in sorted(spans):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    out, last = [], 0
+    for start, end in merged:
+        out += [text[last:start], ("/" if text[start] == "/" else "") + MASK]
+        last = end
+    return "".join(out + [text[last:]])
+
+
+def _verify():
+    bundle = os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("CURL_CA_BUNDLE")
+    if not bundle:
+        return True
+    if os.path.isdir(bundle):
+        return ssl.create_default_context(capath=bundle)
+    return ssl.create_default_context(cafile=bundle)
+
+
+def _decode(body: bytes, charset: Optional[str]) -> str:
+    try:
+        codecs.lookup(charset or "utf-8")
+    except LookupError:
+        charset = None
+    return body.decode(charset or "utf-8", errors="replace")
+
+
+async def _post(url: str, kwargs: Dict) -> Tuple[int, str]:
+    headers = {**kwargs.get("headers", {}), "Accept-Encoding": "identity"}
+    async with asyncio.timeout(_TOTAL_SECONDS):
+        async with httpx.AsyncClient(timeout=_TIMEOUT_SECONDS, follow_redirects=False,
+                                     verify=_verify()) as client:
+            async with client.stream("POST", url, **{**kwargs, "headers": headers}) as response:
+                if 200 <= response.status_code < 400:
+                    return response.status_code, ""
+                encoding = response.headers.get("content-encoding", "identity").strip().lower()
+                if encoding not in ("", "identity"):
+                    return response.status_code, ""
+                body = bytearray()
+                async with contextlib.aclosing(response.aiter_raw()) as chunks:
+                    async for chunk in chunks:
+                        body.extend(chunk[:_MAX_ERROR_BYTES - len(body)])
+                        if len(body) >= _MAX_ERROR_BYTES:
+                            break
+                return response.status_code, _decode(bytes(body), response.charset_encoding)
+
+
+def _run(coro):
+    loop = asyncio.SelectorEventLoop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        try:
+            loop.run_until_complete(_settle())
+        finally:
+            loop.close()
+
+
+async def _settle() -> None:
+    try:
+        async with asyncio.timeout(1):
+            await asyncio.get_running_loop().shutdown_asyncgens()
+            await asyncio.sleep(0)
+            others = asyncio.all_tasks() - {asyncio.current_task()}
+            if others:
+                await asyncio.wait(others)
+    except TimeoutError:
+        for task in asyncio.all_tasks() - {asyncio.current_task()}:
+            task.cancel()
 
 
 def send_to_config(channel_type: str, config: Dict, subject: str, message: str) -> Tuple[bool, str]:
-    """Send one notification. Returns (ok, error_message)."""
     ok, error = validate_config(channel_type, config)
     if not ok:
         return False, error
     try:
         url, kwargs = build_request(channel_type, config, subject, message)
-        response = requests.post(url, timeout=_TIMEOUT_SECONDS, **kwargs)
-        if 200 <= response.status_code < 300:
-            return True, ""
-        return False, _sanitize_error(channel_type, config,
-                                      f"HTTP {response.status_code}: {response.text[:200]}")
+        status, text = _run(_post(url, kwargs))
+    except (TimeoutError, httpx.TimeoutException):
+        return False, _TOO_SLOW
     except Exception as e:
-        return False, _sanitize_error(channel_type, config, str(e))
+        return False, _sanitize_error(channel_type, config, str(e) or type(e).__name__)
+    if 200 <= status < 300:
+        return True, ""
+    if 300 <= status < 400:
+        return False, (f"HTTP {status}: the server redirected the request, "
+                       f"and redirects are not followed. Enter the final URL of the service.")
+    return False, f"HTTP {status}: {_sanitize_error(channel_type, config, text)[:200]}"
 
 
 def _record_result(channel_id: int, ok: bool, error: str) -> None:
@@ -250,10 +362,6 @@ def _record_result(channel_id: int, ok: bool, error: str) -> None:
 
 
 def send_to_all(subject: str, message: str, alert_type: Optional[str] = None) -> Dict[str, int]:
-    """Deliver to every enabled channel subscribed to this alert type.
-
-    Returns {'sent': n, 'failed': n, 'skipped': n}.
-    """
     try:
         with get_db_context() as db:
             all_channels = [
@@ -272,7 +380,12 @@ def send_to_all(subject: str, message: str, alert_type: Optional[str] = None) ->
 
     sent = failed = 0
     for channel in channels:
-        ok, error = send_to_config(channel["type"], channel["config"], subject, message)
+        try:
+            ok, error = send_to_config(channel["type"], channel["config"], subject, message)
+        except Exception as e:
+            logger.error("Notification to '%s' (%s) failed unexpectedly: %s",
+                         channel["name"], channel["type"], type(e).__name__)
+            ok, error = False, _UNEXPECTED
         _record_result(channel["id"], ok, error)
         if ok:
             sent += 1
@@ -294,7 +407,6 @@ def has_enabled_channels() -> bool:
 
 
 def mask_config(channel_type: str, config: Dict) -> Dict:
-    """Hide secret values before sending a channel to the browser."""
     secrets = SECRET_FIELDS.get(channel_type, set())
     return {
         k: (MASK if (k in secrets and str(v).strip()) else v)
@@ -302,11 +414,32 @@ def mask_config(channel_type: str, config: Dict) -> Dict:
     }
 
 
+class SecretEndpointChanged(ValueError):
+    pass
+
+
+def _endpoint(channel_type: str, key: str, config: Dict) -> str:
+    value = str(config.get(key) or "").strip()
+    if not value and channel_type == "ntfy" and key == "server_url":
+        value = "https://ntfy.sh"
+    return value.rstrip("/")
+
+
 def merge_config(channel_type: str, existing: Dict, incoming: Dict) -> Dict:
-    """Keep the stored secret when the UI sends back the mask placeholder."""
     secrets = SECRET_FIELDS.get(channel_type, set())
     merged = dict(incoming or {})
+    existing = existing or {}
+    moved = [f for f in CHANNEL_TYPES.get(channel_type, {}).get("fields", [])
+             if f["key"] in ("server_url", "url")
+             and _endpoint(channel_type, f["key"], merged) != _endpoint(channel_type, f["key"], existing)]
     for key in secrets:
-        if merged.get(key) == MASK:
-            merged[key] = (existing or {}).get(key, "")
+        if merged.get(key) != MASK:
+            continue
+        stored = existing.get(key, "")
+        if moved and str(stored or "").strip():
+            label = next(f["label"] for f in CHANNEL_TYPES[channel_type]["fields"] if f["key"] == key)
+            raise SecretEndpointChanged(
+                f"You changed the {moved[0]['label']}. Enter the {label} again: "
+                f"a stored secret is only sent to the server it was entered for.")
+        merged[key] = stored
     return merged

@@ -1,4 +1,3 @@
-"""Domain-list database work must leave the request loop responsive."""
 import asyncio
 import threading
 from contextlib import contextmanager
@@ -14,6 +13,7 @@ def test_domain_list_http_uses_worker_session(monkeypatch):
     threads = []
     db = Mock()
     db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
+    db.query.return_value.filter.return_value.scalar.return_value = None
 
     @contextmanager
     def session():

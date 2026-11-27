@@ -1,0 +1,12 @@
+{
+  "purify.min.js": {
+    "name": "DOMPurify",
+    "version": "3.4.17",
+    "source": "https://github.com/cure53/DOMPurify/releases/download/3.4.17/purify.min.js",
+    "source_sha256": "cd37898f9782adf54820c413191b5691803f0f137c799d6edcfd38523b4c2c31",
+    "npm_tarball": "https://registry.npmjs.org/dompurify/-/dompurify-3.4.17.tgz",
+    "npm_integrity": "sha512-B/pSlYVHQ58kqISD/yDjuJ1yfzI34m1gF4lAod2bwSRhiN4K5Cl3H8Af7hqB2PmTL911tdEudnnXn5FnhRoz0w==",
+    "change": "Removed the trailing '//# sourceMappingURL=purify.min.js.map' comment; every other byte is the release file, which matches dist/purify.min.js in the npm tarball",
+    "sha256": "1bb973289c6a99e511f9209b4159384a6020ead799eca059f065cf213b28e1f3"
+  }
+}

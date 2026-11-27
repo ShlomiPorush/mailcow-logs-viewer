@@ -1,10 +1,3 @@
-"""
-Tests for tolerant DKIM record matching (issue #292).
-
-DNS providers rewrite DKIM records: they reorder tags, add h=sha256, drop
-t=s or fold the key. Only differences that stop receivers from verifying
-mailcow's signatures may be reported as a mismatch.
-"""
 import pytest
 
 from app.routers import domains
@@ -15,7 +8,6 @@ MAILCOW_RECORD = f'v=DKIM1;k=rsa;t=s;s=email;p={KEY}'
 
 
 class FakeTXT:
-    """Mimics a dnspython TXT rdata that may be split into several strings."""
     def __init__(self, *parts):
         self.strings = tuple(part.encode() for part in parts)
 
@@ -35,8 +27,6 @@ async def _check(monkeypatch, *txt_parts, mailcow_record=MAILCOW_RECORD):
 
 @pytest.mark.asyncio
 async def test_provider_rewritten_record_is_not_a_mismatch(monkeypatch):
-    # Shape reported in #292: reordered, h=sha256 added, t=s dropped,
-    # trailing semicolon, key split across two TXT strings
     published = f'v=DKIM1; h=sha256; k=rsa; p={KEY}; s=email;'
     result = await _check(monkeypatch, published[:120], published[120:])
 
@@ -113,3 +103,21 @@ async def test_revoked_key_is_still_reported(monkeypatch):
 
     assert result['match'] is False
     assert result['status'] == 'error'
+
+
+def test_strict_flag_text_follows_rfc_6376():
+    info = domains.parse_dkim_parameters(MAILCOW_RECORD)['info']
+    (strict,) = [i for i in info if 't=s' in i['message']]
+    assert 'i=' in strict['description'] and 'd=' in strict['description']
+    assert 'Only the main domain can send' not in strict['description']
+
+
+@pytest.mark.asyncio
+async def test_warnings_are_plain_words(monkeypatch):
+    mismatch = await _check(monkeypatch, f'v=DKIM1;k=rsa;t=s;s=email;p={OTHER_KEY}')
+    rewritten = await _check(monkeypatch, f'v=DKIM1;h=sha256;k=rsa;s=email;p={KEY}')
+
+    assert 'Error: Public key (p=) does not match the key in mailcow' in mismatch['warnings']
+    assert 't=s from the mailcow record is missing' in rewritten['warnings']
+    for line in mismatch['warnings'] + rewritten['warnings']:
+        assert line.isascii(), line

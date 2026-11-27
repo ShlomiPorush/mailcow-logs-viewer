@@ -1,137 +1,161 @@
-// =============================================================================
-// MAILCOW LOGS VIEWER - COMPLETE FRONTEND
-// Part 1: Core, Global State, Dashboard, Postfix, Rspamd, Netfilter
-// =============================================================================
-
-// Shared helpers (colors, escaping, formatting, clipboard, toasts) live in
-// utils.js, which is loaded before this file.
-
-// =============================================================================
-// NAVIGATION HELPERS
-// =============================================================================
-
-/**
- * Navigate to Messages page with pre-filled filters
- * @param {Object} options - Filter options
- * @param {string} options.email - Email address to filter by
- * @param {string} options.filterType - 'sender' | 'recipient' | 'search'
- * @param {string} options.direction - 'inbound' | 'outbound' | 'internal'
- * @param {string} options.status - 'delivered' | 'bounced' | 'deferred' | 'rejected'
- */
 function navigateToMessagesWithFilter(options) {
-    // Clear existing filters first
-    const filterSearch = document.getElementById('messages-filter-search');
-    const filterSender = document.getElementById('messages-filter-sender');
-    const filterRecipient = document.getElementById('messages-filter-recipient');
-    const filterDirection = document.getElementById('messages-filter-direction');
-    const filterStatus = document.getElementById('messages-filter-status');
-    const filterUser = document.getElementById('messages-filter-user');
-    const filterIp = document.getElementById('messages-filter-ip');
+    return openMessagesWith(() => {
+        const filterSearch = document.getElementById('messages-filter-search');
+        const filterSender = document.getElementById('messages-filter-sender');
+        const filterRecipient = document.getElementById('messages-filter-recipient');
+        const filterDirection = document.getElementById('messages-filter-direction');
+        const filterStatus = document.getElementById('messages-filter-status');
+        const filterUser = document.getElementById('messages-filter-user');
+        const filterIp = document.getElementById('messages-filter-ip');
 
-    // Reset all filters
-    if (filterSearch) filterSearch.value = '';
-    if (filterSender) filterSender.value = '';
-    if (filterRecipient) filterRecipient.value = '';
-    if (filterDirection) filterDirection.value = '';
-    if (filterStatus) filterStatus.value = '';
-    if (filterUser) filterUser.value = '';
-    if (filterIp) filterIp.value = '';
+        if (filterSearch) filterSearch.value = '';
+        if (filterSender) filterSender.value = '';
+        if (filterRecipient) filterRecipient.value = '';
+        if (filterDirection) filterDirection.value = '';
+        if (filterStatus) filterStatus.value = '';
+        if (filterUser) filterUser.value = '';
+        if (filterIp) filterIp.value = '';
 
-    // Set email filter based on type
-    if (options.email) {
-        if (options.filterType === 'sender') {
-            if (filterSender) filterSender.value = options.email;
-        } else if (options.filterType === 'recipient') {
-            if (filterRecipient) filterRecipient.value = options.email;
-        } else {
-            // Default: use search field
-            if (filterSearch) filterSearch.value = options.email;
+        if (options.email) {
+            if (options.filterType === 'sender') {
+                if (filterSender) filterSender.value = options.email;
+            } else if (options.filterType === 'recipient') {
+                if (filterRecipient) filterRecipient.value = options.email;
+            } else if (options.filterType === 'user') {
+                if (filterUser) filterUser.value = options.email;
+            } else if (filterSearch) {
+                filterSearch.value = options.email;
+            }
         }
-    }
+        if (options.direction && filterDirection) filterDirection.value = options.direction;
+        if (options.status && filterStatus) filterStatus.value = options.status;
+        if (options.ip && filterIp) filterIp.value = options.ip;
 
-    // Set direction filter
-    if (options.direction && filterDirection) {
-        filterDirection.value = options.direction;
-    }
+        const field = el => (el ? el.value : '');
+        messagesExact = (options.exact && field(filterIp)) || options.address || options.domain ? {
+            ip: options.exact ? field(filterIp) : '', address: options.address || '', domain: options.domain || '',
+        } : null;
 
-    // Set status filter
-    if (options.status && filterStatus) {
-        filterStatus.value = options.status;
-    }
-
-    // Navigate to Messages tab
-    navigateTo('messages');
-
-    // Apply filters after navigation
-    setTimeout(() => {
-        if (typeof applyMessagesFilters === 'function') {
-            applyMessagesFilters();
-        }
-    }, 100);
+        if (options.datePreset && MESSAGES_ROLLING_PRESETS.includes(options.datePreset)) messagesShowDatePreset(options.datePreset);
+        else if (options.start && options.end) messagesShowRange(options.start, options.end);
+        readMessagesFilters();
+    });
 }
 
-// =============================================================================
-// AUTHENTICATION SYSTEM
-// =============================================================================
+let messagesOpening = null;
+function openMessagesWith(prepare) {
+    messagesOpening = prepare;
+    return navigateTo('messages').then(moved => {
+        messagesOpening = null;
+        return moved;
+    });
+}
 
-// DMARC imap
 let dmarcImapStatus = null;
 let dmarcConfiguration = null;
 
-// Send the browser to the login page, dropping any client-side state.
-function redirectToLogin() {
-    window.location.replace('/login');
+function redirectToLogin(reason) {
+    if (typeof uiUnsavedClear === 'function') uiUnsavedClear();
+    const here = window.location.pathname + window.location.search;
+    window.location.replace(typeof sessionGuardLoginPath === 'function' ? sessionGuardLoginPath(reason, here)
+        : here === '/' ? '/login' : `/login?next=${encodeURIComponent(here)}`);
 }
 
-// Enhanced fetch with authentication.
-// Both login methods (OAuth2 and Basic Auth) end up with the same HttpOnly
-// session cookie, which the browser attaches automatically. No credential is
-// held in JavaScript, so an XSS in the page has nothing to read.
+async function loginReasonOf(response) {
+    return typeof sessionGuardReasonOf === 'function' ? sessionGuardReasonOf(response) : '';
+}
+
 async function authenticatedFetch(url, options = {}) {
+    const { timeout, ownNotPermitted, ...rest } = options;
     const headers = {
-        ...options.headers,
+        ...rest.headers,
     };
-
-    const response = await fetch(url, {
-        ...options,
-        headers,
-        credentials: 'include' // Send the session cookie
-    });
-
-    // Handle 401 Unauthorized - the session expired or the server restarted
-    if (response.status === 401) {
-        redirectToLogin();
-        throw new Error('Authentication required');
+    let timer = null;
+    if (timeout && typeof AbortController === 'function') {
+        const control = new AbortController();
+        const outer = rest.signal;
+        if (outer) {
+            if (outer.aborted) control.abort();
+            else outer.addEventListener('abort', () => control.abort(), { once: true });
+        }
+        timer = setTimeout(() => control.abort(), timeout);
+        rest.signal = control.signal;
     }
 
-    return response;
+    try {
+        const response = await fetch(url, {
+            ...rest,
+            headers,
+            credentials: 'include'
+        });
+
+        if (response.status === 401) {
+            redirectToLogin(await loginReasonOf(response));
+            throw new Error('Authentication required');
+        }
+        if (response.status === 403 && !ownNotPermitted) await noteNotPermitted(response);
+
+        return response;
+    } catch (error) {
+        clearTimeout(timer);
+        throw error;
+    }
 }
 
-// Handle logout - one path for both login methods, since both are backed by
-// the same server-side session.
-function handleLogout() {
-    window.location.href = '/api/auth/logout';
+async function noteNotPermitted(response) {
+    try {
+        const body = await response.clone().json();
+        if (body && body.detail === UI_NOT_PERMITTED) {
+            uiNotPermitted();
+            refreshAppAccess();
+        }
+    } catch (e) {
+    }
 }
 
-// Check authentication on page load.
-// OAuth2 and Basic Auth both end up with a session cookie, so one check
-// covers them: no session means the browser goes back to the login page.
+async function responseError(response) {
+    return new Error(uiHttpErrorText(response.status, await uiReadJson(response)));
+}
+
+function actionErrorText(response, result) {
+    if (!response.ok) return uiHttpErrorText(response.status, result);
+    const msg = result && result.msg;
+    if (mailcowWords(msg)) return msg;
+    return msg ? `mailcow refused it (${[].concat(msg)[0]})` : uiApiErrorText(result, 'No reason was given');
+}
+function mailcowWords(msg) {
+    return typeof msg === 'string' && /\s/.test(msg.trim()) ? msg : '';
+}
+
+async function handleLogout() {
+    if (typeof uiConfirmLeave === 'function' && !(await uiConfirmLeave(undefined, { keep: true }))) return;
+    try {
+        const response = await authenticatedFetch('/api/auth/logout', { method: 'POST' });
+        if (!response.ok) {
+            showToast('Could not sign out. Try again in a moment.', 'error');
+            return;
+        }
+    } catch (e) {
+        return;
+    }
+    if (typeof uiUnsavedClear === 'function') uiUnsavedClear();
+    window.location.href = '/login';
+}
+
 async function checkAuthentication() {
-    // First check if authentication is enabled
     try {
         const infoResponse = await fetch('/api/info', { credentials: 'include' });
         if (infoResponse.ok) {
             const infoData = await infoResponse.json();
-            // If authentication is disabled, allow access
             if (!infoData.auth_enabled) {
                 return true;
             }
         }
     } catch (e) {
-        // If we can't check, assume auth is enabled for safety
         console.warn('Could not check auth status, assuming enabled');
     }
 
+    let reason = '';
     try {
         const statusResponse = await fetch('/api/auth/status', { credentials: 'include' });
         if (statusResponse.ok) {
@@ -139,24 +163,26 @@ async function checkAuthentication() {
             if (statusData.authenticated) {
                 const logoutBtn = document.getElementById('logout-btn');
                 if (logoutBtn) logoutBtn.classList.remove('hidden');
+                document.getElementById('mobile-logout')?.classList.remove('hidden');
+                setAppAccess(statusData);
                 return true;
             }
+            reason = statusData.reason;
+        } else if (statusResponse.status === 401) {
+            reason = await loginReasonOf(statusResponse);
         }
     } catch (e) {
-        // Could not reach the status endpoint - treat as not authenticated
     }
 
-    redirectToLogin();
+    redirectToLogin(reason);
     return false;
 }
 
-// =============================================================================
-// EXISTING CODE CONTINUES...
-// =============================================================================
-
-// Global state
 let currentTab = 'dashboard';
-let appTimezone = 'UTC'; // Default timezone, will be updated from API
+let appTimezone = 'UTC';
+let appTimezoneStatus = { valid: true, configured: '' };
+let appDateFormat = 'browser';
+let appTimeFormat = '24h';
 let currentPage = {
     netfilter: 1,
     messages: 1
@@ -167,71 +193,174 @@ let currentFilters = {
     messages: {}
 };
 
-// Global RW API key status (shared across all features)
 let mailcowRwConfigured = false;
+let rwStatusReady = Promise.resolve();
 
-// Feature toggles - features in this list are disabled (hidden from UI, jobs stopped)
 window.disabledFeatures = [];
 
-// All toggleable feature definitions (for settings UI)
 const TOGGLEABLE_FEATURES = [
-    { id: 'netfilter', label: 'Security', description: 'Fail2Ban management and security events' },
-    { id: 'queue', label: 'Queue', description: 'Mail queue monitoring' },
-    { id: 'quarantine', label: 'Quarantine', description: 'Quarantined emails and auto-rules' },
-    { id: 'spam-filter', label: 'Spam Filter', description: 'Bounce suppression and Rspamd maps' },
+    { id: 'netfilter', label: 'Security', description: 'Review login attempts, bans, and protection rules.' },
+    { id: 'queue', label: 'Queue', description: 'Outbound > Queue: mail waiting in the Postfix queue' },
+    { id: 'suppressions', label: 'Suppressions', description: 'Outbound > Suppressions: recipients blocked after failed delivery' },
+    { id: 'quarantine', label: 'Quarantine', description: 'Review quarantined messages and manage Auto-Rules.' },
+    { id: 'rspamd', label: 'Rspamd', description: 'The Rspamd maps that allow or block mail, incoming and outgoing' },
     { id: 'domains', label: 'Domains', description: 'Domain DNS analysis and transports' },
-    { id: 'dmarc', label: 'DMARC & TLS', description: 'DMARC/TLS reports and IMAP sync' },
+    { id: 'dmarc', label: 'DMARC & TLS', description: 'Review DMARC and TLS reports.' },
     { id: 'mailbox-stats', label: 'Mailbox Stats', description: 'Mailbox and alias statistics' },
     { id: 'rate-limits', label: 'Rate Limits', description: 'Sender rate limit hits and the configured limits' },
+    { id: 'devices', label: 'Devices', description: 'Review devices that sync through ActiveSync.' },
     { id: 'logs', label: 'Logs', description: 'Raw service log viewer' },
-    { id: 'blacklist', label: 'IP Blacklist Monitor', description: 'DNS blacklist monitoring for your IPs' },
+    { id: 'blacklist', label: 'Blocklists', description: 'Check whether sending IPs are on blocklists.' },
 ];
 
 function isFeatureDisabled(featureId) {
     return window.disabledFeatures.includes(featureId);
 }
 
-function applyFeatureToggles() {
-    // Hide desktop and mobile tabs for disabled features
-    for (const feature of window.disabledFeatures) {
-        // Desktop tab
-        const tab = document.getElementById(`tab-${feature}`);
-        if (tab) tab.style.display = 'none';
-        // Mobile tab
-        const mobileTab = document.getElementById(`mobile-tab-${feature}`);
-        if (mobileTab) mobileTab.style.display = 'none';
-    }
-    // Ensure enabled features are visible (in case of settings change)
-    for (const feature of TOGGLEABLE_FEATURES) {
-        if (!window.disabledFeatures.includes(feature.id)) {
-            const tab = document.getElementById(`tab-${feature.id}`);
-            if (tab) tab.style.display = '';
-            const mobileTab = document.getElementById(`mobile-tab-${feature.id}`);
-            if (mobileTab) mobileTab.style.display = '';
+const TAB_FEATURES = {
+    outbound: { queue: 'queue', suppressions: 'suppressions' }
+};
+
+function tabFeatureOn(page, tab) {
+    const feature = TAB_FEATURES[page] && TAB_FEATURES[page][tab];
+    return !feature || !isFeatureDisabled(feature);
+}
+
+function pageTabOn(page, tab) {
+    const tabs = Object.keys(TAB_FEATURES[page]);
+    return tabs.includes(tab) && tabFeatureOn(page, tab) ? tab : (tabs.find(t => tabFeatureOn(page, t)) || tabs[0]);
+}
+
+function pageAllOff(page) {
+    return !Object.keys(TAB_FEATURES[page]).some(tab => tabFeatureOn(page, tab));
+}
+
+function pageIsOff(page) {
+    if (TAB_FEATURES[page]) return pageAllOff(page);
+    if (page === 'mailbox-stats' && !isFeatureDisabled('rate-limits')) return false;
+    return isFeatureDisabled(page);
+}
+
+const PAGE_AREAS = {
+    dashboard: 'status', messages: 'messages', netfilter: 'security', outbound: 'outbound', quarantine: 'quarantine',
+    rspamd: 'rspamd', status: 'status', domains: 'domains', dmarc: 'dmarc', 'mailbox-stats': 'mailboxes',
+    devices: 'mailboxes', logs: 'logs', settings: 'admin', about: 'status',
+};
+const MENU_ORDER = ['dashboard', 'messages', 'outbound', 'quarantine', 'netfilter', 'rspamd', 'dmarc', 'status',
+    'domains', 'mailbox-stats', 'devices', 'logs', 'settings', 'about'];
+
+function userCanView(page) {
+    const area = PAGE_AREAS[page];
+    return !area || userCan(area);
+}
+
+function landingPage() {
+    return MENU_ORDER.find(page => userCanView(page) && !pageIsOff(page)) || '';
+}
+
+function navEntryShown(btn) {
+    return btn.style.display !== 'none' && !btn.classList.contains('ui-no-view');
+}
+
+function applyPageAccess() {
+    for (const page of Object.keys(PAGE_AREAS)) {
+        for (const id of [`tab-${page}`, `mobile-tab-${page}`, `tabbar-${page}`]) {
+            const el = document.getElementById(id);
+            if (el) el.classList.toggle('ui-no-view', !userCanView(page));
         }
     }
-    
-    // Special handling for blacklist feature - it doesn't have its own tab,
-    // it's a section inside the Domains page
-    const blacklistSection = document.getElementById('blacklist-section');
-    const dashboardBlacklistCard = document.getElementById('dashboard-blacklist-card');
-    if (window.disabledFeatures.includes('blacklist')) {
-        if (blacklistSection) blacklistSection.style.display = 'none';
-        if (dashboardBlacklistCard) dashboardBlacklistCard.style.display = 'none';
-    } else {
-        if (blacklistSection) blacklistSection.style.display = '';
-        if (dashboardBlacklistCard) dashboardBlacklistCard.style.display = '';
+    document.querySelectorAll('.ui-server').forEach(el => el.classList.toggle('ui-no-view', !userCan('status')));
+    document.getElementById('suppression-open-map')?.classList.toggle('ui-no-view', !userCan('rspamd'));
+    document.querySelectorAll('[data-nav-group]').forEach(group => {
+        group.classList.toggle('ui-no-view', ![...group.querySelectorAll('button')].some(navEntryShown));
+    });
+    const line = document.getElementById('ui-user-line');
+    const name = document.getElementById('ui-user-name');
+    if (line && name) {
+        name.textContent = appAccess.name;
+        line.classList.toggle('hidden', !appAccess.name);
+    }
+    const logout = document.getElementById('logout-btn');
+    if (logout) logout.title = appAccess.name ? `Logout (${appAccess.name})` : 'Logout';
+}
+
+let accessRefreshAt = 0;
+async function refreshAppAccess() {
+    if (Date.now() - accessRefreshAt < 10000) return;
+    accessRefreshAt = Date.now();
+    try {
+        const response = await fetch('/api/auth/status', { credentials: 'include' });
+        if (!response.ok) return;
+        appAccessCheck(await response.json());
+    } catch (e) {
+    }
+}
+
+function applyTabFeatures(page) {
+    const prefix = `${page}-tab-btn-`;
+    let shown = 0;
+    for (const tab of Object.keys(TAB_FEATURES[page])) {
+        const btn = document.getElementById(prefix + tab);
+        const on = tabFeatureOn(page, tab);
+        if (btn) btn.classList.toggle('hidden', !on);
+        if (on) shown++;
+    }
+    const bar = document.getElementById(`${page}-tabs`);
+    if (bar) bar.classList.toggle('hidden', shown < 2);
+}
+
+function applyFeatureToggles() {
+    const navIds = feature => [`tab-${feature}`, `mobile-tab-${feature}`, `tabbar-${feature}`];
+    for (const feature of window.disabledFeatures) {
+        for (const id of navIds(feature)) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = 'none';
+        }
+    }
+    for (const feature of TOGGLEABLE_FEATURES) {
+        if (!window.disabledFeatures.includes(feature.id)) {
+            for (const id of navIds(feature.id)) {
+                const el = document.getElementById(id);
+                if (el) el.style.display = '';
+            }
+        }
+    }
+    const openMap = document.getElementById('suppression-open-map');
+    if (openMap) openMap.style.display = isFeatureDisabled('rspamd') ? 'none' : '';
+
+    for (const page of Object.keys(TAB_FEATURES)) {
+        for (const id of [`tab-${page}`, `mobile-tab-${page}`, `tabbar-${page}`]) {
+            const el = document.getElementById(id);
+            if (el) el.style.display = pageAllOff(page) ? 'none' : '';
+        }
+        applyTabFeatures(page);
+    }
+    if (typeof outboundTab !== 'undefined' && outboundTab !== pageTabOn('outbound', outboundTab)) {
+        if (currentTab === 'outbound' && !pageAllOff('outbound')) outboundShowTab(outboundTab);
+        else outboundTab = pageTabOn('outbound', outboundTab);
     }
 
-    // Same for rate-limits - it is a view inside the Mailbox Stats page,
-    // so the feature toggle hides its switcher button instead of a tab
+    document.querySelectorAll('[data-nav-group]').forEach(group => {
+        const visible = [...group.querySelectorAll('button')].some(navEntryShown);
+        group.style.display = visible ? '' : 'none';
+    });
+    
+    const blacklistSection = document.getElementById('blacklist-section');
+    const dashboardBlacklistCard = document.getElementById('dashboard-blacklist-card');
+    const statusBlacklistKpi = document.getElementById('status-kpi-blocklists-cell');
+    const statusBlacklistTab = document.getElementById('status-tab-btn-blocklists');
+    const blacklistOff = window.disabledFeatures.includes('blacklist');
+    if (blacklistOff && typeof statusTab !== 'undefined' && statusTab === 'blocklists') statusShowTab('server');
+    [blacklistSection, dashboardBlacklistCard, statusBlacklistKpi, statusBlacklistTab].forEach(el => {
+        if (el) el.style.display = blacklistOff ? 'none' : '';
+    });
+
     const mailboxStatsOff = window.disabledFeatures.includes('mailbox-stats');
     const rateLimitsOff = window.disabledFeatures.includes('rate-limits');
 
     const rateLimitsViewBtn = document.getElementById('mailbox-stats-view-rate-limits');
     if (rateLimitsOff) {
         if (rateLimitsViewBtn) rateLimitsViewBtn.style.display = 'none';
-        // Never leave the user stranded on a view that just disappeared
         if (typeof mailboxStatsView !== 'undefined' && mailboxStatsView === 'rate-limits' && !mailboxStatsOff) {
             mailboxStatsSwitchView('statistics');
         }
@@ -239,12 +368,7 @@ function applyFeatureToggles() {
         if (rateLimitsViewBtn) rateLimitsViewBtn.style.display = '';
     }
 
-    // The mirror case: Rate Limits does not depend on Mailbox Stats. With
-    // Mailbox Stats off and Rate Limits on, the page stays reachable and
-    // becomes the Rate Limits page - Statistics is the view that disappears,
-    // and with one view left the switcher itself has nothing to offer.
     const statsViewBtn = document.getElementById('mailbox-stats-view-statistics');
-    // Not 'mailbox-stats-view-*': that prefix is the switcher's button query
     const viewSwitcher = document.getElementById('mailbox-stats-views');
     if (mailboxStatsOff && !rateLimitsOff) {
         if (statsViewBtn) statsViewBtn.style.display = 'none';
@@ -253,7 +377,6 @@ function applyFeatureToggles() {
             if (currentTab === 'mailbox-stats') {
                 mailboxStatsSwitchView('rate-limits');
             } else {
-                // Only remember it - switching now would fetch for a hidden page
                 mailboxStatsView = 'rate-limits';
             }
         }
@@ -262,8 +385,6 @@ function applyFeatureToggles() {
         if (viewSwitcher) viewSwitcher.style.display = '';
     }
 
-    // The tab is shared by both features, so it only goes when both are off,
-    // and it says what it actually opens
     const mailboxTabLabel = mailboxStatsOff && !rateLimitsOff ? 'Rate Limits' : 'Mailbox Stats';
     for (const tabId of ['tab-mailbox-stats', 'mobile-tab-mailbox-stats']) {
         const tab = document.getElementById(tabId);
@@ -273,9 +394,13 @@ function applyFeatureToggles() {
     }
 }
 
-// A nav tab is an <svg> icon followed by its label in a bare text node, so the
-// label is swapped on that node and the icon and markup are left alone.
 function setNavTabLabel(tab, label) {
+    const span = tab.querySelector('.ui-nav-label');
+    if (span) {
+        if (span.textContent !== label) span.textContent = label;
+        tab.title = label;
+        return;
+    }
     for (let i = tab.childNodes.length - 1; i >= 0; i--) {
         const node = tab.childNodes[i];
         if (node.nodeType !== Node.TEXT_NODE) continue;
@@ -288,7 +413,6 @@ function setNavTabLabel(tab, label) {
 }
 
 function updateDisabledFeaturesCheckbox(featureId, isChecked, el) {
-    // Update the hidden input value
     const hiddenInput = document.getElementById('setting-disabled_features');
     if (!hiddenInput) return;
 
@@ -297,25 +421,17 @@ function updateDisabledFeaturesCheckbox(featureId, isChecked, el) {
     );
 
     if (isChecked) {
-        // Feature is being enabled (checked) - remove from disabled list
         currentDisabled.delete(featureId);
     } else {
-        // Feature is being disabled (unchecked) - add to disabled list
         currentDisabled.add(featureId);
     }
 
     hiddenInput.value = Array.from(currentDisabled).sort().join(',');
 
-    // Update visual styling of the label
     const label = el ? el.closest('label') : null;
     if (label) {
-        if (isChecked) {
-            label.classList.remove('border-gray-200', 'dark:border-gray-700', 'bg-gray-50/50', 'dark:bg-gray-800/50', 'opacity-60');
-            label.classList.add('border-green-200', 'dark:border-green-700/50', 'bg-green-50/50', 'dark:bg-green-900/10');
-        } else {
-            label.classList.remove('border-green-200', 'dark:border-green-700/50', 'bg-green-50/50', 'dark:bg-green-900/10');
-            label.classList.add('border-gray-200', 'dark:border-gray-700', 'bg-gray-50/50', 'dark:bg-gray-800/50', 'opacity-60');
-        }
+        label.classList.toggle('is-on', isChecked);
+        label.classList.toggle('is-off', !isChecked);
     }
 }
 
@@ -331,30 +447,44 @@ async function fetchRwStatus() {
         console.warn('Failed to fetch RW status:', e);
         mailcowRwConfigured = false;
     }
+    showQuarantineRulesAccess();
+    if (currentTab === 'netfilter') {
+        renderSecurityOverview();
+        renderSecurityLists();
+        renderSecuritySettings();
+    }
+    if (currentTab === 'outbound' && allQueueData.length) applyQueueFilters();
+    if (currentTab === 'quarantine' && quarantineLastData) renderQuarantineData(quarantineLastData);
 }
 
-// Auto-refresh configuration
-const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
-let autoRefreshTimer = null;
+function showQuarantineRulesAccess() {
+    document.getElementById('quarantine-rules-section')?.classList.toggle('hidden', !mailcowRwConfigured);
+    const locked = document.getElementById('quarantine-rules-locked');
+    if (locked) {
+        locked.classList.toggle('hidden', mailcowRwConfigured);
+        locked.innerHTML = mailcowRwConfigured ? ''
+            : uiLocked('Auto-Rules are locked', `Rules release or delete held messages in mailcow by themselves, so they ${UI_RW_KEY_TEXT}`);
+    }
+    return mailcowRwConfigured;
+}
 
-// Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
+    uiInitMenus();
     console.log('=== mailcow Logs Viewer Initializing ===');
 
-    // Check authentication first
     const isAuthenticated = await checkAuthentication();
     if (!isAuthenticated) {
         console.log('Authentication required - showing login modal');
         return;
     }
+    applyPageAccess();
 
-    // Check if all required elements exist
     const requiredElements = [
         'app-title',
         'content-dashboard',
         'content-messages',
         'content-netfilter',
-        'content-queue',
+        'content-outbound',
         'content-quarantine',
         'content-status',
         'content-settings',
@@ -370,38 +500,75 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await loadAppInfo();
     loadMailcowVersionStatus();
-    fetchRwStatus();
+    rwStatusReady = fetchRwStatus().catch(() => {});
 
-    // Initialize router and get initial route from URL
     const routeInfo = typeof initRouter === 'function' ? initRouter() : { baseRoute: 'dashboard', params: {} };
     const initialTab = routeInfo.baseRoute || routeInfo;
     const initialParams = routeInfo.params || {};
     console.log('Initial tab from URL:', initialTab, 'params:', initialParams);
 
-    // Load the initial tab (use switchTab to ensure proper initialization)
     switchTab(initialTab, initialParams);
 
-    // Start auto-refresh for all tabs
-    startAutoRefresh();
+    startPageRefresh();
 
     console.log('=== Initialization Complete ===');
 });
 
-// =============================================================================
-// APP INFO & VERSION
-// =============================================================================
+const AUTH_OFF_BANNER_DISMISSED_KEY = 'authOffBannerDismissed';
+
+function authOffBannerDismissed() {
+    try { return localStorage.getItem(AUTH_OFF_BANNER_DISMISSED_KEY) === '1'; } catch (e) { return false; }
+}
+
+function dismissAuthOffBanner() {
+    try { localStorage.setItem(AUTH_OFF_BANNER_DISMISSED_KEY, '1'); } catch (e) {}
+    const banner = document.getElementById('auth-off-banner');
+    if (banner) banner.classList.add('hidden');
+}
+
+function setAppTimezone(info) {
+    let zone = (info && info.timezone) || 'UTC';
+    try {
+        new Intl.DateTimeFormat('en-US', { timeZone: zone });
+    } catch (e) {
+        console.warn('Unknown time zone from the server, using UTC:', zone);
+        zone = 'UTC';
+    }
+    appTimezone = zone;
+    appTimezoneStatus = {
+        valid: !info || info.timezone_valid !== false,
+        configured: (info && typeof info.timezone_configured === 'string') ? info.timezone_configured : '',
+    };
+    if (info && typeof info.date_format === 'string') appDateFormat = info.date_format;
+    if (info && typeof info.time_format === 'string') appTimeFormat = info.time_format;
+}
+
+let appTitleText = document.title;
+let documentTitleQueued = false;
+function queueDocumentTitle() {
+    if (documentTitleQueued) return;
+    documentTitleQueued = true;
+    requestAnimationFrame(() => {
+        documentTitleQueued = false;
+        if (typeof currentTab === 'undefined' || !currentTab) return;
+        const name = TAB_LABELS[currentTab] || currentTab;
+        const sub = topbarSubLabel(currentTab);
+        document.title = [name, sub && sub !== name ? sub : '', appTitleText].filter(Boolean).join(' · ');
+    });
+}
 
 async function loadAppInfo() {
     try {
-        // Use regular fetch since this is called after authentication check
         const response = await authenticatedFetch('/api/info');
         const data = await response.json();
 
         if (data.app_title) {
             document.getElementById('app-title').textContent = data.app_title;
-            document.title = data.app_title;
+            appTitleText = data.app_title;
+            queueDocumentTitle();
+            const phoneTitle = document.getElementById('mtop-app-title');
+            if (phoneTitle) phoneTitle.textContent = data.app_title;
 
-            // Update footer app name
             const footerName = document.getElementById('app-name-footer');
             if (footerName) {
                 footerName.textContent = data.app_title;
@@ -413,15 +580,15 @@ async function loadAppInfo() {
             logoImg.src = data.app_logo_url;
             logoImg.classList.remove('hidden');
             document.getElementById('default-logo').classList.add('hidden');
+            const phoneLogo = document.getElementById('mtop-logo');
+            if (phoneLogo) phoneLogo.src = data.app_logo_url;
         }
 
-        // Update footer version
         const footerVersion = document.getElementById('app-version-footer');
         if (footerVersion && data.version) {
             footerVersion.textContent = `v${data.version}`;
         }
 
-        // Show/hide logout button based on auth status
         const logoutBtn = document.getElementById('logout-btn');
         if (logoutBtn) {
             if (data.auth_enabled) {
@@ -430,56 +597,322 @@ async function loadAppInfo() {
                 logoutBtn.classList.add('hidden');
             }
         }
+        document.getElementById('mobile-logout')?.classList.toggle('hidden', !data.auth_enabled);
 
-        // Store timezone for date formatting
-        if (data.timezone) {
-            appTimezone = data.timezone;
-            console.log('Timezone loaded from API:', appTimezone);
-        } else {
-            console.warn('No timezone in API response, using default:', appTimezone);
-        }
+        const authOffBanner = document.getElementById('auth-off-banner');
+        if (authOffBanner) authOffBanner.classList.toggle('hidden', data.auth_enabled !== false || authOffBannerDismissed());
 
-        // Load disabled features and apply tab hiding
+        setAppTimezone(data);
+
         if (data.disabled_features && Array.isArray(data.disabled_features)) {
             window.disabledFeatures = data.disabled_features;
             console.log('Disabled features:', window.disabledFeatures);
             applyFeatureToggles();
         }
+        window.settingsEditable = data.settings_edit_via_ui_enabled !== false;
 
-        // Load app version status for update check
-        await loadAppVersionStatus();
+        loadAppVersionStatus();
+        const connectionChecked = loadMailcowConnectionStatus();
 
-        // Load mailcow connection status
-        await loadMailcowConnectionStatus();
+        placeShellUtilities();
+        window.matchMedia('(max-width: 760px)').addEventListener('change', placeShellUtilities);
+        window.matchMedia('(max-width: 760px)').addEventListener('change', () => placeTopbar());
+        watchTopbarCrumbs();
+        connectionChecked.then(startNavCounters);
+        startAttention();
     } catch (error) {
         console.error('Failed to load app info:', error);
     }
 }
 
+function placeShellUtilities() {
+    const tools = document.getElementById('ui-utilities');
+    const phoneSlot = document.getElementById('ui-mtop-actions');
+    const foot = document.getElementById('app-footer');
+    if (!tools || !phoneSlot || !foot) return;
+    if (window.matchMedia('(max-width: 760px)').matches) {
+        if (tools.parentNode !== phoneSlot) phoneSlot.appendChild(tools);
+    } else if (tools.parentNode !== foot) {
+        foot.appendChild(tools);
+    }
+}
+
+const TOPBAR_SKIP = new Set(['messages']);
+let topbarMoves = [];
+let topbarRoute = null;
+
+function topbarMove(el, target) {
+    if (!el || !target) return;
+    const mark = document.createComment('topbar');
+    el.replaceWith(mark);
+    target.appendChild(el);
+    topbarMoves.push([el, mark]);
+}
+
+function topbarRestore() {
+    for (const [el, mark] of topbarMoves.reverse()) mark.replaceWith(el);
+    topbarMoves = [];
+    document.querySelectorAll('.ui-page-crumbs, .ui-head-slot, .ui-head-links').forEach(el => el.remove());
+}
+
+function placeTopbar(route = topbarRoute) {
+    topbarRoute = route;
+    const bar = document.getElementById('ui-topbar');
+    if (!bar) return;
+    topbarRestore();
+    const page = route ? document.getElementById(`content-${route}`) : null;
+    const head = page ? page.querySelector('.ui-page-head') : null;
+    const intro = head ? head.firstElementChild : null;
+    const title = intro ? intro.querySelector('.ui-h1') : null;
+    const on = !!title && !TOPBAR_SKIP.has(route) && !window.matchMedia('(max-width: 760px)').matches;
+    document.documentElement.classList.toggle('ui-has-topbar', on);
+    if (!on) {
+        placeHeadPrimary(route, intro, title);
+        return;
+    }
+
+    const brandSlot = document.getElementById('ui-topbar-brand');
+    topbarMove(document.querySelector('.ui-sidenav .ui-brand'), brandSlot);
+    topbarMove(document.getElementById('ui-nav-toggle'), brandSlot);
+    const crumbs = document.createElement('nav');
+    crumbs.className = 'ui-crumbs ui-page-crumbs';
+    crumbs.setAttribute('aria-label', 'You are here');
+    title.before(crumbs);
+    topbarMove(title, document.getElementById('ui-topbar-title'));
+    [...head.children].filter(el => el !== intro).forEach(el => topbarMove(el, document.getElementById('ui-topbar-actions')));
+    if (route === 'dmarc') topbarMove(document.getElementById('dmarc-last-sync-info'), intro);
+    updateTopbarCrumbs();
+}
+
+function placeHeadPrimary(route, intro, title) {
+    if (!title || !window.matchMedia('(max-width: 760px)').matches) return;
+    const primary = intro.parentNode.querySelector('.ui-head-primary');
+    if (!primary) return;
+    const slot = document.createElement('span');
+    slot.className = 'ui-head-slot';
+    title.after(slot);
+    topbarMove(primary, slot);
+    if (route === 'dmarc') {
+        const links = document.createElement('div');
+        links.className = 'ui-head-links';
+        intro.appendChild(links);
+        ['dmarc-last-sync-info', 'dmarc-manage-btn'].forEach(id => topbarMove(document.getElementById(id), links));
+        topbarMove(document.getElementById('dmarc-upload-btn'), slot);
+    }
+}
+
+function topbarSubLabel(route) {
+    const page = document.getElementById(`content-${route}`);
+    const tab = page && page.querySelector('[role="tab"][aria-selected="true"], [role="tab"].active, .settings-edit-nav [aria-current="true"]');
+    if (!tab) return '';
+    const label = tab.cloneNode(true);
+    label.querySelectorAll('.ui-tab-n, .ui-count, .ui-nav-count, .hidden').forEach(n => n.remove());
+    return label.textContent.replace(/\s+/g, ' ').trim();
+}
+
+let topbarPageCrumbs = null;
+
+function setPageCrumbs(route, sub, back, labels) {
+    topbarPageCrumbs = labels && labels.length ? { route, sub, back, labels } : null;
+    updateTopbarCrumbs();
+}
+
+function updateTopbarCrumbs() {
+    queueDocumentTitle();
+    const nav = document.querySelector('.ui-page-crumbs');
+    if (!nav || !topbarRoute) return;
+    const route = topbarRoute;
+    const item = document.getElementById(`tab-${route}`);
+    const group = item && item.closest('.ui-nav-group');
+    const groupLabel = group && group.querySelector('.ui-nav-group-label');
+    const name = TAB_LABELS[route] || route;
+    const sub = topbarSubLabel(route);
+    const parts = [];
+    if (groupLabel) parts.push(`<span class="ui-crumb-group">${escapeHtml(groupLabel.textContent.trim())}</span>`);
+    const inner = topbarPageCrumbs && topbarPageCrumbs.route === route && topbarPageCrumbs.sub === sub ? topbarPageCrumbs : null;
+    parts.push(sub ? `<button type="button" class="ui-crumb" onclick="topbarOpenPage('${escapeJsArg(route)}')">${escapeHtml(name)}</button>`
+        : inner ? `<button type="button" class="ui-crumb" onclick="${inner.back}">${escapeHtml(name)}</button>`
+        : `<span class="ui-crumb-current" aria-current="page">${escapeHtml(name)}</span>`);
+    if (sub && sub !== name) {
+        parts.push(inner ? `<button type="button" class="ui-crumb" onclick="${inner.back}">${escapeHtml(sub)}</button>`
+            : `<span class="ui-crumb-current" aria-current="page">${escapeHtml(sub)}</span>`);
+    }
+    if (inner) {
+        inner.labels.forEach((item, i) => {
+            const label = typeof item === 'string' ? item : item.label;
+            const action = typeof item === 'string' ? null : item.action;
+            parts.push(i === inner.labels.length - 1 ? `<span class="ui-crumb-current" aria-current="page">${escapeHtml(label)}</span>`
+                : action ? `<button type="button" class="ui-crumb" onclick="${escapeHtml(action)}">${escapeHtml(label)}</button>`
+                : `<span class="ui-crumb-group">${escapeHtml(label)}</span>`);
+        });
+    }
+    nav.innerHTML = parts.join('<span class="ui-crumb-sep" aria-hidden="true">›</span>');
+}
+
+function topbarOpenPage(route) {
+    if (typeof SUBPAGES !== 'undefined' && SUBPAGES[route]) navigateTo(route, { sub: subpageFirst(route) });
+    else if (route === 'dmarc' && typeof dmarcOpenTab === 'function') dmarcOpenTab();
+    else navigateTo(route);
+}
+
+function watchTopbarCrumbs() {
+    const content = document.querySelector('.ui-content');
+    if (!content || typeof MutationObserver === 'undefined') return;
+    let queued = false;
+    new MutationObserver(records => {
+        if (queued || !records.some(r => r.target.matches && r.target.matches('[role="tab"], .settings-edit-tab'))) return;
+        queued = true;
+        requestAnimationFrame(() => { queued = false; updateTopbarCrumbs(); });
+    }).observe(content, { subtree: true, attributes: true, attributeFilter: ['aria-selected', 'aria-current', 'class'] });
+}
+
+function setNavCount(page, count, isFail, title) {
+    for (const el of [document.getElementById(`nav-count-${page}`), document.getElementById(`mobile-nav-count-${page}`)]) {
+        if (!el) continue;
+        if (count > 0) {
+            el.textContent = count.toLocaleString();
+            el.classList.toggle('is-fail', !!isFail);
+            el.title = title || '';
+            el.classList.remove('hidden');
+        } else {
+            el.classList.add('hidden');
+        }
+    }
+}
+
+const READ_FAILED = { failed: true };
+
+function serverCheckFound(key, data) {
+    if (data === READ_FAILED) return null;
+    if (!data) return [];
+    if (key === 'connection') return data.connected === false ? [data] : [];
+    if (key === 'blocklist') return data.status === 'error' ? null : data.status === 'listed' ? [data] : [];
+    if (key === 'containers') {
+        if (data.containers_known === false) return null;
+        return data.containers && data.containers.stopped > 0 ? [data.containers] : [];
+    }
+    if (key === 'dmarc') {
+        return (data.insights || []).filter(i =>
+            i.recommendations.some(r => r.type === 'tighten_policy' || r.type === 'low_pass_rate') || (i.new_sources && i.new_sources.length > 0));
+    }
+    return [data];
+}
+
+let mailcowConnection;
+
+const NAV_COUNTERS_EVERY = 5 * 60 * 1000;
+let navCountersAt = 0;
+
+let navCountersPending = false;
+function navCountersTick() {
+    if (navCountersPending || document.hidden || Date.now() - navCountersAt < NAV_COUNTERS_EVERY - 2000) return;
+    navCountersAt = Date.now();
+    navCountersPending = true;
+    loadMailcowConnectionStatus().finally(() => { navCountersPending = false; }).then(loadNavCounters);
+}
+
+function startNavCounters() {
+    loadNavCounters();
+    setInterval(navCountersTick, PAGE_REFRESH_TICK);
+    document.addEventListener('visibilitychange', navCountersTick);
+}
+
+async function loadNavCounters() {
+    navCountersAt = Date.now();
+    const off = (feature, area) => (window.disabledFeatures || []).includes(feature) || !userCan(area);
+    const get = async url => {
+        try {
+            const res = await authenticatedFetch(url);
+            return res.ok ? await res.json() : READ_FAILED;
+        } catch (e) {
+            return READ_FAILED;
+        }
+    };
+    const [dashboard, queue, quarantine, insights, summary, blacklist, info] = await Promise.all([
+        off('netfilter', 'security') ? null : get('/api/logs/netfilter/overview'),
+        off('queue', 'outbound') ? null : get('/api/queue'),
+        off('quarantine', 'quarantine') ? null : get('/api/quarantine'),
+        off('dmarc', 'dmarc') ? null : get('/api/dmarc/insights'),
+        off('', 'status') ? null : get('/api/status/summary'),
+        off('blacklist', 'status') ? null : get('/api/blacklist/summary'),
+        off('', 'status') ? null : get('/api/settings/info'),
+    ]);
+
+    if (dashboard !== READ_FAILED) {
+        const failedLogins = dashboard ? dashboard.failed_logins || 0 : 0;
+        setNavCount('netfilter', failedLogins, false, `${failedLogins} failed logins in the last 24 hours`);
+    }
+    if (queue !== READ_FAILED) {
+        const queued = queue && Array.isArray(queue.data) ? queue.data.length : 0;
+        setNavCount('outbound', queued, false, `${queued} messages in the queue`);
+    }
+    if (quarantine !== READ_FAILED) {
+        const held = quarantine ? (quarantine.total || (quarantine.data || []).length) : 0;
+        setNavCount('quarantine', held, false, `${held} quarantined messages`);
+    }
+    if (insights !== READ_FAILED) {
+        const dmarcActions = serverCheckFound('dmarc', insights).length;
+        setNavCount('dmarc', dmarcActions, false, `${dmarcActions} DMARC insights`);
+    }
+
+    const found = {
+        connection: serverCheckFound('connection', off('', 'status') ? null : mailcowConnection),
+        containers: serverCheckFound('containers', summary),
+        blocklist: serverCheckFound('blocklist', blacklist),
+    };
+    const problems = [];
+    if (found.connection && found.connection.length) problems.push('not connected to mailcow');
+    const stopped = found.containers && found.containers.length ? found.containers[0].stopped : 0;
+    if (stopped > 0) problems.push(`${stopped} container${stopped === 1 ? '' : 's'} stopped`);
+    if (found.blocklist && found.blocklist.length) problems.push('listed on a blocklist');
+    const unchecked = Object.values(found).includes(null);
+    if (problems.length || !unchecked) setNavCount('status', problems.length, true, problems.join(', '));
+
+    const label = problems.length ? `${problems.length} problem${problems.length === 1 ? '' : 's'}`
+        : unchecked ? 'Could not check' : 'No problems';
+    const small = document.getElementById('ui-server-problems');
+    if (small) {
+        small.textContent = label;
+        small.title = problems.join(', ');
+        small.classList.toggle('has-problems', problems.length > 0);
+    }
+    const pip = document.getElementById('tabbar-pip-status');
+    if (pip && (problems.length || !unchecked)) pip.classList.toggle('hidden', problems.length === 0);
+
+    const host = document.getElementById('ui-server-host');
+    const url = info && info.configuration ? info.configuration.mailcow_url : '';
+    if (host && url) {
+        try { host.textContent = new URL(url).hostname; } catch (e) { host.textContent = url; }
+    }
+}
+
 async function loadMailcowConnectionStatus() {
+    if (!userCan('status')) return;
     try {
         const response = await authenticatedFetch('/api/status/mailcow-connection');
-        if (!response.ok) return;
+        if (!response.ok) {
+            if (!mailcowConnection) mailcowConnection = READ_FAILED;
+            return;
+        }
 
         const data = await response.json();
+        mailcowConnection = data;
         const indicator = document.getElementById('mailcow-connection-indicator');
 
         if (indicator) {
             indicator.classList.remove('hidden');
             if (data.connected) {
-                indicator.classList.remove('text-red-500');
+                indicator.classList.remove('text-red-500', 'text-gray-400');
                 indicator.classList.add('text-green-500');
                 indicator.title = 'Connected to mailcow';
-                // Update SVG to checkmark
                 const svg = indicator.querySelector('svg');
                 if (svg) {
                     svg.innerHTML = '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"></path>';
                 }
             } else {
-                indicator.classList.remove('text-green-500');
+                indicator.classList.remove('text-green-500', 'text-gray-400');
                 indicator.classList.add('text-red-500');
                 indicator.title = 'Not connected to mailcow';
-                // Update SVG to X
                 const svg = indicator.querySelector('svg');
                 if (svg) {
                     svg.innerHTML = '<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"></path>';
@@ -488,10 +921,11 @@ async function loadMailcowConnectionStatus() {
         }
     } catch (error) {
         console.error('Failed to load mailcow connection status:', error);
+        if (!mailcowConnection) mailcowConnection = READ_FAILED;
         const indicator = document.getElementById('mailcow-connection-indicator');
         if (indicator) {
             indicator.classList.remove('hidden');
-            indicator.classList.remove('text-green-500');
+            indicator.classList.remove('text-green-500', 'text-red-500');
             indicator.classList.add('text-gray-400');
             indicator.title = 'Connection status unknown';
         }
@@ -499,6 +933,7 @@ async function loadMailcowConnectionStatus() {
 }
 
 async function loadAppVersionStatus() {
+    if (!userCan('status')) return;
     try {
         const response = await authenticatedFetch('/api/status/app-version');
         if (!response.ok) return;
@@ -514,12 +949,13 @@ async function loadAppVersionStatus() {
         if (updateBadge && data.update_available) {
             updateBadge.classList.remove('hidden');
             updateBadge.title = `Update available: v${data.latest_version}`;
+            updateBadge.textContent = `v${data.latest_version} available`;
 
-            // Allow clicking badge to view changelog
+            appUpdateInfo = data;
             updateBadge.onclick = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
-                showMarkdownModal(`Update: v${data.latest_version}`, data.changelog || 'No changelog available');
+                showAppUpdateModal();
             };
         } else if (updateBadge) {
             updateBadge.classList.add('hidden');
@@ -529,9 +965,15 @@ async function loadAppVersionStatus() {
     }
 }
 
-// Helper to show markdown content in the changelog modal
+let appUpdateInfo = null;
+
+function showAppUpdateModal() {
+    if (!appUpdateInfo) return;
+    showMarkdownModal(`Update: v${appUpdateInfo.latest_version}`, appUpdateInfo.changelog || 'No changelog available');
+}
+
 function showMarkdownModal(title, markdownContent) {
-    let htmlContent = markdownContent;
+    let htmlContent = escapeHtml(markdownContent);
     try {
         if (typeof marked !== 'undefined') {
             marked.setOptions({
@@ -539,9 +981,27 @@ function showMarkdownModal(title, markdownContent) {
                 gfm: true
             });
             htmlContent = renderMarkdown(markdownContent);
+            const tpl = document.createElement('template');
+            tpl.innerHTML = htmlContent;
+            tpl.content.querySelectorAll('a[href^="http"]').forEach(a => {
+                a.target = '_blank';
+                a.rel = 'noopener noreferrer';
+            });
+            htmlContent = tpl.innerHTML;
         }
     } catch (e) {
         console.error('Failed to parse markdown:', e);
+    }
+
+    if (uiIsPhone()) {
+        uiSheetShow('markdown-sheet', {
+            label: title,
+            head: `<h3 class="ui-sheet-title">${escapeHtml(title)}</h3>`,
+            body: `<div class="markdown-body">${htmlContent}</div>`,
+            expand: true,
+            progress: true
+        });
+        return;
     }
 
     const modal = document.getElementById('changelog-modal');
@@ -553,14 +1013,13 @@ function showMarkdownModal(title, markdownContent) {
             modalTitle.textContent = title;
         }
 
-        // Add some basic styling for markdown content
-        content.innerHTML = `<div class="markdown-body prose dark:prose-invert max-w-none">${htmlContent}</div>`;
-        modal.classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
+        content.innerHTML = `<div class="markdown-body">${htmlContent}</div>`;
+        revealChangelogModal(modal);
     }
 }
 
 async function loadMailcowVersionStatus() {
+    if (!userCan('status')) return;
     try {
         const response = await authenticatedFetch('/api/status/version');
         if (!response.ok) return;
@@ -570,33 +1029,28 @@ async function loadMailcowVersionStatus() {
         const footerVersion = document.getElementById('mailcow-version-footer');
         const footerUpdateBadge = document.getElementById('mailcow-update-badge');
 
-        // Update footer version text
         if (footerVersion && data.current_version) {
             footerVersion.textContent = `mailcow: v${data.current_version}`;
         }
 
-        // Handle update indicators (both header icon and footer badge)
         if (data.update_available) {
-            // Update global state for the shared modal function
             window.mailcowUpdateVersion = data.latest_version;
             window.mailcowUpdateName = data.name || '';
             window.mailcowUpdateChangelog = data.changelog || 'No changelog available';
+            if (footerUpdateBadge) footerUpdateBadge.textContent = `mailcow ${data.latest_version} available`;
 
-            // Function to handle clicks using the shared logic
             const handleClick = (e) => {
                 e.preventDefault();
                 e.stopPropagation();
                 showMailcowUpdateModal();
             };
 
-            // Header Icon
             if (updateIcon) {
                 updateIcon.classList.remove('hidden');
                 updateIcon.title = `Update available: ${data.latest_version}`;
                 updateIcon.onclick = handleClick;
             }
 
-            // Footer Badge
             if (footerUpdateBadge) {
                 footerUpdateBadge.classList.remove('hidden');
                 footerUpdateBadge.title = `Update available: ${data.latest_version}`;
@@ -611,11 +1065,6 @@ async function loadMailcowVersionStatus() {
     }
 }
 
-// =============================================================================
-// AUTO-REFRESH SYSTEM - Smart refresh (only updates when data changes)
-// =============================================================================
-
-// Cache for last fetched data (to compare and detect changes)
 let lastDataCache = {
     messages: null,
     netfilter: null,
@@ -625,179 +1074,560 @@ let lastDataCache = {
     settings: null
 };
 
-// Cache for version info (separate from settings cache, doesn't update on smart refresh)
 let versionInfoCache = {
     app_version: null,
     version_info: null
 };
 
-function startAutoRefresh() {
-    // Clear existing timer if any
-    if (autoRefreshTimer) {
-        clearInterval(autoRefreshTimer);
-    }
+const PAGE_REFRESH_TICK = 30000;
+const PAGE_REFRESH_TIMEOUT = 20000;
+const pageRefreshers = {};
+const pageRefreshState = { route: null, at: 0, timer: null };
 
-    // Set up auto-refresh interval
-    autoRefreshTimer = setInterval(() => {
-        smartRefreshCurrentTab();
-    }, AUTO_REFRESH_INTERVAL);
-
-    console.log(`[OK] Auto-refresh started (every ${AUTO_REFRESH_INTERVAL / 1000}s)`);
+function registerPageRefresh(route, every, run) {
+    pageRefreshers[route] = { every, run, busy: false };
 }
 
-function stopAutoRefresh() {
-    if (autoRefreshTimer) {
-        clearInterval(autoRefreshTimer);
-        autoRefreshTimer = null;
-        console.log('[STOP] Auto-refresh stopped');
-    }
+function pageRefreshEvery(refresher) {
+    return typeof refresher.every === 'function' ? refresher.every() : refresher.every;
 }
 
-// Smart refresh - fetches data silently and only updates if changed
-async function smartRefreshCurrentTab() {
-    // Don't refresh if modal is open
+function pageRefreshLoaded(route) {
+    pageRefreshState.route = route;
+    pageRefreshState.at = Date.now();
+}
+
+function pageRefreshRetry(route) {
+    if (pageRefreshState.route === route) pageRefreshState.at = 0;
+}
+
+async function pageRefreshNow() {
+    const route = currentTab;
+    const refresher = pageRefreshers[route];
+    if (!refresher || refresher.busy || pageIsOff(route) || !userCanView(route)) return;
     const modal = document.getElementById('message-modal');
-    if (modal && !modal.classList.contains('hidden')) {
-        return;
-    }
-
+    if (modal && !modal.classList.contains('hidden') && !modal.classList.contains('ui-docked')) return;
+    refresher.busy = true;
+    pageRefreshState.route = route;
+    pageRefreshState.at = Date.now();
     try {
-        switch (currentTab) {
-            case 'dashboard':
-                await smartRefreshDashboard();
-                break;
-            case 'messages':
-                await smartRefreshMessages();
-                break;
-            case 'netfilter':
-                await smartRefreshNetfilter();
-                break;
-            case 'queue':
-                await smartRefreshQueue();
-                break;
-            case 'quarantine':
-                await smartRefreshQuarantine();
-                break;
-            case 'status':
-                await loadStatus(); // Status is fast, just reload
-                break;
-            case 'settings':
-                await smartRefreshSettings();
-                break;
-            case 'spam-filter':
-                await smartRefreshSpamFilter();
-                break;
-        }
+        await Promise.race([refresher.run(), new Promise(resolve => setTimeout(resolve, PAGE_REFRESH_TIMEOUT))]);
     } catch (error) {
-        console.error('Auto-refresh error:', error);
+        console.error(`Refresh of ${route} failed:`, error);
+    } finally {
+        refresher.busy = false;
     }
 }
 
-// Helper to check if data changed
+function pageRefreshTick() {
+    if (document.hidden) return;
+    const refresher = pageRefreshers[currentTab];
+    if (!refresher) return;
+    if (pageRefreshState.route !== currentTab) pageRefreshLoaded(currentTab);
+    if (Date.now() - pageRefreshState.at >= pageRefreshEvery(refresher) - 2000) pageRefreshNow();
+}
+
+function startPageRefresh() {
+    if (pageRefreshState.timer) return;
+    pageRefreshState.timer = setInterval(pageRefreshTick, PAGE_REFRESH_TICK);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) pageRefreshTick(); });
+}
+
+registerPageRefresh('dashboard', 30000, () => smartRefreshDashboard());
+registerPageRefresh('messages', 30000, () => smartRefreshMessages());
+registerPageRefresh('netfilter', 30000, async () => {
+    await smartRefreshNetfilter();
+    await loadSecurityOverview();
+    fail2banSettingsLoaded = false;
+    loadFail2BanSettings();
+    if (typeof refreshProtectionHits === 'function') refreshProtectionHits();
+    if (typeof refreshSmtpAbusePanel === 'function' && Date.now() - smtpAbuseLoadedAt >= 58000) refreshSmtpAbusePanel();
+});
+registerPageRefresh('outbound', 30000, async () => {
+    if (!isFeatureDisabled('queue')) await smartRefreshQueue();
+    if (!isFeatureDisabled('suppressions')) {
+        if (outboundTab === 'suppressions') await smartRefreshSuppressions();
+        else await loadSuppressionStats();
+    }
+});
+registerPageRefresh('quarantine', 30000, async () => {
+    await smartRefreshQuarantine();
+    if (quarantineTab !== 'rules' || !showQuarantineRulesAccess()) return;
+    await loadQuarantineRules({ quiet: true });
+    const history = document.getElementById('quarantine-rules-history');
+    if (history && !history.classList.contains('hidden')) await loadQuarantineRuleHistory({ quiet: true });
+});
+registerPageRefresh('status', 30000, async () => {
+    statusQuiet = true;
+    try {
+        await loadStatus();
+    } finally {
+        statusQuiet = false;
+    }
+});
+registerPageRefresh('rspamd', 60000, () => refreshRspamdMaps());
+registerPageRefresh('settings', 30000, async () => {
+    await smartRefreshSettings();
+    if (typeof refreshUsersPanel === 'function') await refreshUsersPanel();
+});
+registerPageRefresh('domains', 5 * 60 * 1000, () => refreshDomains());
+registerPageRefresh('dmarc', 5 * 60 * 1000, () => dmarcReload(true));
+registerPageRefresh('mailbox-stats', () => mailboxStatsRefreshEvery(), () => refreshMailboxStatsPage());
+registerPageRefresh('devices', 60000, () => loadDevices(devicesPage, { quiet: true }));
+
 function hasDataChanged(newData, cacheKey) {
     const oldData = lastDataCache[cacheKey];
     if (!oldData) return true;
 
-    // Compare JSON strings for simple change detection
     const newJson = JSON.stringify(newData);
     const oldJson = JSON.stringify(oldData);
     return newJson !== oldJson;
 }
 
-// Smart refresh for Messages - only update if new messages arrived
-// Only refreshes if there are no active filters/search (to avoid disrupting user's view)
 async function smartRefreshMessages() {
     const filters = currentFilters.messages || {};
+    const busy = () => messagesFullLoad || messagesPaging.loading;
+    if (messagesNoId || messagesRefreshing || busy()) return;
+    refreshMessagesNoId();
+    if (!lastDataCache.messages) return loadMessages();
 
-    // Don't refresh if user has active search or filters
-    const hasActiveFilters = filters.search || filters.sender || filters.recipient ||
-        filters.direction || filters.status || filters.user || filters.ip;
-
-    // Don't refresh if user is not on first page
-    if (hasActiveFilters || currentPage.messages > 1) {
-        return; // Skip refresh to avoid disrupting user's view
-    }
-
-    const params = new URLSearchParams({
-        page: currentPage.messages,
-        limit: 50
-    });
-
-    if (filters.search) params.append('search', filters.search);
-    if (filters.sender) params.append('sender', filters.sender);
-    if (filters.recipient) params.append('recipient', filters.recipient);
-    if (filters.direction) params.append('direction', filters.direction);
-    if (filters.status) params.append('status', filters.status);
-    if (filters.user) params.append('user', filters.user);
-    if (filters.ip) params.append('ip', filters.ip);
-
-    const response = await authenticatedFetch(`/api/messages?${params}`);
-    if (!response.ok) return;
-
-    const data = await response.json();
-
-    if (hasDataChanged(data, 'messages')) {
-        console.log('[REFRESH] Messages data changed, updating UI');
-        lastDataCache.messages = data;
-        renderMessagesData(data);
+    const free = () => messagesAtNewEdge() && !uiTextHeld(document.getElementById('messages-logs'));
+    const gen = messagesGen;
+    messagesRefreshing = true;
+    try {
+        if (messagesOrder === 'desc' && free()) {
+            const response = await messagesFetch(`/api/messages?${messagesQueryParams()}`, PAGE_REFRESH_TIMEOUT);
+            if (!response.ok) return;
+            const data = await response.json();
+            if (gen !== messagesGen || busy()) return;
+            if (free()) {
+                if (!messagesSameAsShown(data)) {
+                    const now = messagesNewGeneration();
+                    uiKeepFocus(document.getElementById('messages-logs'), 'data-key', () => renderMessagesData(data));
+                    loadMessageFacets(filters, now);
+                } else {
+                    if (data.watermark != null) messagesNew.watermark = data.watermark;
+                    loadMessageFacets(filters, gen);
+                }
+                return;
+            }
+        }
+        if (messagesOrder === 'asc' && messagesPaging.cursor) {
+            loadMessageFacets(filters, gen);
+            return;
+        }
+        if (messagesNew.watermark === null) return;
+        const params = messagesFilterParams(filters);
+        params.set('after_id', messagesNew.watermark);
+        const response = await messagesFetch(`/api/messages/new?${params}`, PAGE_REFRESH_TIMEOUT);
+        if (!response.ok) return;
+        const data = await response.json();
+        if (gen !== messagesGen || busy()) return;
+        messagesNew.count = data.count || 0;
+        if (messagesOrder === 'asc' && free()) {
+            messagesRefreshing = false;
+            await messagesShowNew({ quiet: true });
+            return;
+        }
+        renderMessagesNew();
+        loadMessageFacets(filters, gen);
+    } catch (error) {
+        if (error.name !== 'AbortError') console.error('Messages refresh failed:', error);
+    } finally {
+        messagesRefreshing = false;
     }
 }
 
-// Render messages without loading spinner
+const messagesNew = { watermark: null, count: 0 };
+
+function messagesSameAsShown(data) {
+    const shown = lastDataCache.messages;
+    if (!shown) return false;
+    const rows = data.data || [];
+    const had = shown.data || [];
+    return data.total === shown.total && rows.length <= had.length && JSON.stringify(rows) === JSON.stringify(had.slice(0, rows.length));
+}
+
+function messagesScroller(container) {
+    for (let el = container; el && el !== document.body; el = el.parentElement) {
+        const overflow = getComputedStyle(el).overflowY;
+        if ((overflow === 'auto' || overflow === 'scroll') && el.scrollHeight > el.clientHeight + 1) return el;
+    }
+    return document.scrollingElement || document.documentElement;
+}
+
+function messagesInView(scroller) {
+    if (scroller === document.scrollingElement || scroller === document.documentElement) return { top: 0, bottom: window.innerHeight };
+    const box = scroller.getBoundingClientRect();
+    return { top: box.top, bottom: box.bottom };
+}
+
+function messagesAtNewEdge() {
+    const container = document.getElementById('messages-logs');
+    if (!container || !container.getClientRects().length) return false;
+    const rows = container.querySelectorAll('.ui-msg-item');
+    if (!rows.length) return true;
+    const view = messagesInView(messagesScroller(container));
+    if (messagesOrder === 'asc') {
+        return !messagesPaging.cursor && rows[rows.length - 1].getBoundingClientRect().bottom <= view.bottom + 8;
+    }
+    return rows[0].getBoundingClientRect().top >= view.top - 8;
+}
+
+function renderMessagesNew() {
+    const list = document.querySelector('#messages-logs .ui-msg-list');
+    let wrap = document.getElementById('messages-new-wrap');
+    const count = messagesNew.count;
+    if (!list || !count) {
+        if (wrap) wrap.hidden = true;
+        return;
+    }
+    if (!wrap) {
+        wrap = document.createElement('div');
+        wrap.id = 'messages-new-wrap';
+        wrap.className = 'ui-msg-new-wrap';
+        wrap.innerHTML = `<button type="button" class="ui-msg-new" onclick="messagesShowNew()">
+            <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d=""></path></svg>
+            <span></span></button>`;
+    }
+    const top = messagesOrder !== 'asc';
+    wrap.classList.toggle('is-top', top);
+    const bar = document.querySelector('#content-messages .ui-msg-searchbar');
+    const sticky = bar && getComputedStyle(bar).position === 'sticky';
+    wrap.style.setProperty('--ui-msg-new-top', sticky ? `${bar.offsetHeight}px` : '0px');
+    if (top ? list.previousElementSibling !== wrap : list.nextElementSibling !== wrap) {
+        if (top) list.before(wrap); else list.after(wrap);
+    }
+    wrap.querySelector('path').setAttribute('d', top ? 'M5 15l7-7 7 7' : 'M19 9l-7 7-7-7');
+    wrap.querySelector('span').textContent = `${count.toLocaleString()} new ${count === 1 ? 'message' : 'messages'}`;
+    wrap.hidden = false;
+}
+
+async function messagesShowNew({ quiet = false } = {}) {
+    const container = document.getElementById('messages-logs');
+    if (!container) return;
+    if (messagesOrder === 'asc') {
+        const shown = container.querySelectorAll('.ui-msg-item').length;
+        const stillFree = () => messagesAtNewEdge() && !uiTextHeld(container);
+        await loadMessages({ quiet, rows: Math.max(50, shown + messagesNew.count), toEnd: true, applyIf: quiet ? stillFree : null });
+        return;
+    }
+    const scroller = messagesScroller(container);
+    await loadMessages();
+    if (scroller !== container) scroller.scrollTop = 0;
+}
+
+function messagesScrollToEnd(container) {
+    const scroller = messagesScroller(container);
+    scroller.scrollTop = scroller.scrollHeight;
+}
+
+function renderMessageRow(msg) {
+    const tone = messageRowTone(msg);
+    return `
+        <div class="ui-msg-item${tone ? ` ui-msg-${tone}` : ''}" data-key="${escapeHtml(msg.correlation_key || '')}"${msg.message_id ? ` data-mid="${encodeURIComponent(msg.message_id)}"` : ''} onclick="if (!uiRowHeld(event)) viewMessageDetails('${escapeJsArg(msg.correlation_key)}')">
+            <div class="ui-msg-l1">
+                <b class="ui-msg-from ui-fit" title="${escapeHtml(msg.sender || '')}">${messageRowAddress(msg.sender)}</b>
+                <button type="button" class="ui-row-open ui-msg-at" aria-label="${msg.first_seen ? `${escapeHtml(formatListTime(msg.first_seen))}, open` : 'Open'} the message: ${escapeHtml(msg.subject || 'No subject')}">${uiTime(msg.first_seen, formatListTime(msg.first_seen), { title: formatTime(msg.first_seen) })}</button>
+            </div>
+            <div class="ui-msg-to ui-fit" title="${escapeHtml(msg.recipient || '')}"><span class="ui-msg-to-word">to</span> ${messageRowAddress(msg.recipient)}${renderRecipientMore(msg)}</div>
+            <div class="ui-msg-l3">
+                <p class="ui-msg-sub" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
+                <span class="ui-msg-tags">${uiCorrelationTag(msg, { folder: true })}${msg.direction ? uiDirectionTag(msg.direction, { short: true }) : ''}${msg.is_spam ? '<span class="ui-tag ui-tag-spam">SPAM</span>' : ''}</span>
+            </div>
+        </div>`;
+}
+
+function messageRowAddress(value) {
+    const html = value ? uiEntity('address', value, { plain: true, fit: true }) : 'Unknown';
+    return html.startsWith('<span class="ui-ent') ? html : `<span class="ui-fit-text">${html}</span>`;
+}
+
+function messageRowTone(msg) {
+    const tone = UI_STATUS_TONE[msg.final_status];
+    if (tone) return tone;
+    return msg.is_complete === false ? 'warn' : '';
+}
+
 function renderMessagesData(data) {
     const container = document.getElementById('messages-logs');
     if (!container) return;
-
-    if (!data.data || data.data.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No messages found</p>';
-        return;
-    }
-
-    container.innerHTML = `
-        <div class="space-y-3">
-            ${data.data.map(msg => `
-                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition cursor-pointer" onclick="viewMessageDetails('${msg.correlation_key}')">
-                    <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-2 items-start">
-                        <div class="min-w-0 overflow-hidden">
-                            <div class="flex flex-wrap items-center gap-2 mb-1">
-                                <span class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(msg.sender || 'Unknown')}</span>
-                                <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                </svg>
-                                <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
-                            </div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400 truncate" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
-                        </div>
-                        <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
-                            ${(() => {
-            const correlationStatus = getCorrelationStatusDisplay(msg);
-            if (correlationStatus) {
-                return `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${correlationStatus.class}" title="${msg.final_status || (msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs')}">${correlationStatus.display}</span>`;
-            }
-            return '';
-        })()}
-                            ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
-                            ${msg.is_spam !== null ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${msg.is_spam ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'}">${msg.is_spam ? 'SPAM' : 'CLEAN'}</span>` : ''}
-                        </div>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-                        <span>${formatTime(msg.first_seen)}</span>
-                        ${msg.queue_id ? `<span class="font-mono" title="Queue ID">Q: ${msg.queue_id}</span>` : ''}
-                        ${msg.message_id ? `<span class="font-mono truncate max-w-xs" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
-                        ${msg.spam_score !== null ? `<span>Score: <span class="${msg.spam_score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${msg.spam_score.toFixed(1)}</span></span>` : ''}
-                        ${renderMailboxFolderHint(msg)}
-                        ${renderDeliveriesChip(msg)}
-                        ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
-                        ${msg.ip ? `<span>IP: ${msg.ip}</span>` : ''}
-                    </div>
-                </div>
-            `).join('')}
-        </div>
-        ${renderPagination('messages', data.page, data.pages)}
-    `;
+    showMessagesFirstPage(container, data);
+    if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
 }
 
-// Deduplicate netfilter logs based on message + time + priority
+function showMessagesFirstPage(container, data) {
+    lastDataCache.messages = { ...data, watermark: null };
+    messagesNew.watermark = data.watermark ?? null;
+    messagesNew.count = 0;
+    const rows = data.data || [];
+    messagesPaging.page = 1;
+    messagesPaging.total = data.total || rows.length;
+    messagesPaging.cursor = rows.length ? data.next_cursor || null : null;
+    currentPage.messages = 1;
+    setMessagesCount(messagesPaging.total);
+    if (!rows.length) {
+        container.innerHTML = messagesFiltersOn() ? `
+            <div class="ui-empty">
+                <p><b>No messages match these filters</b></p>
+                <p><button onclick="clearMessagesFilters()" class="ui-btn ui-btn-sm">Clear filters</button></p>
+            </div>` : '<p class="ui-empty">No messages yet. Mail that mailcow sends and receives shows up here.</p>';
+        return;
+    }
+    renderMessagesList(container, data);
+}
+
+function setMessagesCount(total) {
+    const countEl = document.getElementById('messages-count');
+    if (countEl) countEl.textContent = total === null ? '' : messagesNoId
+        ? uiCountLabel(total || 0, 'unlinked message', 'unlinked messages')
+        : uiCountLabel(total || 0, 'message', 'messages');
+}
+
+const messagesPaging = { page: 1, pages: 1, total: 0, cursor: null, loading: false, failed: false, observer: null };
+let messagesGen = 0;
+let messagesFullLoad = false;
+let messagesRefreshing = false;
+const messagesRequests = new Set();
+
+function messagesNewGeneration() {
+    messagesGen++;
+    messagesRequests.forEach(control => control.abort());
+    messagesRequests.clear();
+    messagesPaging.loading = false;
+    messagesPaging.failed = false;
+    return messagesGen;
+}
+
+async function messagesFetch(url, timeout = 0) {
+    const control = typeof AbortController === 'function' ? new AbortController() : null;
+    if (control) messagesRequests.add(control);
+    try {
+        const response = await authenticatedFetch(url, { ...(control ? { signal: control.signal } : {}), ...(timeout ? { timeout } : {}) });
+        const data = response.ok ? await response.json() : await uiReadJson(response);
+        return { ok: response.ok, status: response.status, json: async () => data };
+    } finally {
+        if (control) messagesRequests.delete(control);
+    }
+}
+
+const MESSAGES_FILTER_KEYS = ['search', 'sender', 'recipient', 'direction', 'user', 'status', 'ip', 'address', 'domain', 'exact_ip', 'exact', 'start_date', 'end_date'];
+
+let messagesExact = null;
+const MESSAGES_EXACT_FIELDS = ['ip'];
+
+function setMessagesFilters(filters) {
+    messagesExact = null;
+    currentFilters.messages = filters;
+}
+
+function messagesWithExact(fields) {
+    const x = messagesExact;
+    if (x && MESSAGES_EXACT_FIELDS.some(key => x[key] && (fields[key] || '') !== x[key])) messagesExact = null;
+    if (!messagesExact) return fields;
+    return { ...fields, ...(x.ip ? { exact_ip: 'true' } : {}), ...(x.address ? { address: x.address } : {}), ...(x.domain ? { domain: x.domain } : {}) };
+}
+
+function messagesExactParts(x) {
+    const parts = [];
+    if (x.address) parts.push(['From or to', x.address]);
+    if (x.domain) parts.push(['From or to', `@${x.domain}`]);
+    if (x.ip) parts.push(['IP', x.ip]);
+    return parts;
+}
+
+function clearMessagesExact() {
+    if (messagesExact) {
+        MESSAGES_EXACT_FIELDS.forEach(key => {
+            const el = messagesExact[key] && document.getElementById(`messages-filter-${key}`);
+            if (el) el.value = '';
+        });
+    }
+    messagesExact = null;
+    applyMessagesFilters();
+}
+
+let messagesNoId = false;
+let messagesNoIdCount = 0;
+const MESSAGES_NOID_KEYS = ['search', 'start_date', 'end_date'];
+
+function messagesListUrl(params) {
+    return `${messagesNoId ? '/api/messages/without-message-id' : '/api/messages'}?${params}`;
+}
+
+function showMessagesWithoutId(on) {
+    messagesNoId = !!on;
+    if (messagesNoId) {
+        ['sender', 'recipient', 'user', 'ip', 'direction', 'status'].forEach(name => {
+            const field = document.getElementById(`messages-filter-${name}`);
+            if (field) field.value = '';
+        });
+        toggleMessagesFilters(false);
+        const kept = currentFilters.messages || {};
+        setMessagesFilters(Object.fromEntries(['search', 'date_range', 'start_date', 'end_date']
+            .filter(key => kept[key]).map(key => [key, kept[key]])));
+    }
+    const page = document.getElementById('content-messages');
+    if (page) page.classList.toggle('is-noid', messagesNoId);
+    const modal = document.getElementById('message-modal');
+    if (modal && !modal.classList.contains('hidden') && typeof closeMessageModal === 'function') closeMessageModal();
+    currentPage.messages = 1;
+    loadMessages();
+}
+
+function leaveMessagesWithoutId() {
+    if (!messagesNoId) return;
+    messagesNoId = false;
+    const page = document.getElementById('content-messages');
+    if (page) page.classList.remove('is-noid');
+    renderMessagesNoId();
+}
+
+function renderMessagesNoId() {
+    const link = document.getElementById('messages-noid');
+    if (!link) return;
+    const n = messagesNoIdCount;
+    link.textContent = messagesNoId ? 'Back to main list' : `+ ${uiCountLabel(n, 'unlinked message', 'unlinked messages')}`;
+    link.title = messagesNoId ? '' : 'Messages without a usable Message-ID could not be linked to their spam scan and are not in this list. Show them';
+    link.classList.toggle('hidden', !messagesNoId && !n);
+}
+
+let messagesNoIdAsked = '';
+async function refreshMessagesNoId() {
+    if (messagesNoId) return renderMessagesNoId();
+    const filters = messagesRangeFilters(currentFilters.messages || {});
+    const params = new URLSearchParams({ limit: 1 });
+    for (const key of MESSAGES_NOID_KEYS) {
+        if (filters[key]) params.append(key, filters[key]);
+    }
+    const asked = params.toString();
+    messagesNoIdAsked = asked;
+    try {
+        const response = await authenticatedFetch(`/api/messages/without-message-id?${asked}`, { timeout: PAGE_REFRESH_TIMEOUT });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (messagesNoId || asked !== messagesNoIdAsked) return;
+        messagesNoIdCount = data.total || 0;
+        renderMessagesNoId();
+    } catch (error) {
+        if (error.name !== 'AbortError') console.warn('Failed to count messages without a Message-ID:', error);
+    }
+}
+
+function messagesQueryParams(cursor = null, limit = 50, upto = null) {
+    const filters = messagesRangeFilters(currentFilters.messages || {});
+    if (messagesNoId) {
+        const params = new URLSearchParams({ limit });
+        for (const key of MESSAGES_NOID_KEYS) {
+            if (filters[key]) params.append(key, filters[key]);
+        }
+        if (messagesOrder === 'asc') params.append('order', 'asc');
+        if (cursor) params.append('cursor', cursor);
+        return params;
+    }
+    const params = new URLSearchParams({ page: 1, limit });
+    for (const key of MESSAGES_FILTER_KEYS) {
+        if (filters[key]) params.append(key, filters[key]);
+    }
+    if (messagesOrder === 'asc') params.append('order', 'asc');
+    if (cursor) params.append('cursor', cursor);
+    if (cursor && upto !== null && upto !== undefined) params.append('upto_id', upto);
+    return params;
+}
+
+let messagesOrder = 'desc';
+const MESSAGES_ORDER_ICONS = {
+    desc: '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4.5h14M3 9h10M3 13.5h7m7.5-4.5v11m0 0l-3.5-3.5m3.5 3.5l3.5-3.5"></path></svg>',
+    asc: '<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4.5h14M3 9h10M3 13.5h7m7.5 6.5V9m0 0l-3.5 3.5M17.5 9l3.5 3.5"></path></svg>',
+};
+function renderMessagesSort() {
+    const slot = document.getElementById('messages-sort');
+    if (!slot) return;
+    let button = slot.querySelector('button');
+    if (!button) {
+        slot.innerHTML = `<button type="button" class="ui-icon-btn ui-sort-btn-icon" onclick="setMessagesOrder(messagesOrder === 'asc' ? 'desc' : 'asc')"></button>`;
+        button = slot.querySelector('button');
+    }
+    const asc = messagesOrder === 'asc';
+    button.innerHTML = MESSAGES_ORDER_ICONS[asc ? 'asc' : 'desc'];
+    button.setAttribute('aria-label', `Sort: ${asc ? 'Oldest first' : 'Newest first'}`);
+    button.title = asc ? 'Oldest first. Click for newest first' : 'Newest first. Click for oldest first';
+    button.classList.toggle('is-set', asc);
+}
+document.addEventListener('DOMContentLoaded', renderMessagesSort);
+function setMessagesOrder(order) {
+    messagesOrder = order === 'asc' ? 'asc' : 'desc';
+    renderMessagesSort();
+    loadMessages();
+}
+
+function messagesMoreText() {
+    if (messagesPaging.cursor) return 'Loading more...';
+    return messagesPaging.total ? `All ${messagesPaging.total} messages shown` : '';
+}
+
+function renderMessagesList(container, data) {
+    container.innerHTML = `
+        <div class="ui-msg-list">${data.data.map(renderMessageRow).join('')}</div>
+        <p id="messages-more" class="ui-msg-more" aria-live="polite">${messagesMoreText()}</p>
+    `;
+    watchMessagesEnd(container);
+}
+
+function watchMessagesEnd(container) {
+    if (messagesPaging.observer) messagesPaging.observer.disconnect();
+    const sentinel = document.getElementById('messages-more');
+    if (!sentinel || typeof IntersectionObserver === 'undefined') return;
+    const root = container.scrollHeight > container.clientHeight + 1 || getComputedStyle(container).overflowY !== 'visible' ? container : null;
+    messagesPaging.observer = new IntersectionObserver(entries => {
+        if (entries.some(e => e.isIntersecting)) loadMoreMessages();
+    }, { root, rootMargin: '0px 0px 600px 0px' });
+    messagesPaging.observer.observe(sentinel);
+}
+
+async function loadMoreMessages(retry = false) {
+    if (retry) messagesPaging.failed = false;
+    if (messagesPaging.loading || messagesPaging.failed || !messagesPaging.cursor) return;
+    const list = document.querySelector('#messages-logs .ui-msg-list');
+    if (!list) return;
+    messagesPaging.loading = true;
+    const gen = messagesGen;
+    try {
+        const response = await messagesFetch(messagesListUrl(messagesQueryParams(messagesPaging.cursor, 50, messagesNew.watermark)));
+        if (!response.ok) throw await responseError(response);
+        const data = await response.json();
+        if (gen !== messagesGen) return;
+        const seen = new Set([...list.querySelectorAll('.ui-msg-item[data-key]')].map(row => row.dataset.key));
+        const ids = new Set([...list.querySelectorAll('.ui-msg-item[data-mid]')].map(row => row.dataset.mid));
+        const added = (data.data || []).filter(msg => !seen.has(msg.correlation_key || '') && !(msg.message_id && ids.has(encodeURIComponent(msg.message_id))));
+        list.insertAdjacentHTML('beforeend', added.map(renderMessageRow).join(''));
+        if (lastDataCache.messages) lastDataCache.messages = { ...lastDataCache.messages, data: (lastDataCache.messages.data || []).concat(added), total: data.total ?? lastDataCache.messages.total, next_cursor: data.next_cursor || null };
+        messagesPaging.page += 1;
+        currentPage.messages = messagesPaging.page;
+        messagesPaging.cursor = data.next_cursor || null;
+        messagesPaging.total = data.total ?? messagesPaging.total;
+        setMessagesCount(messagesPaging.total);
+        const more = document.getElementById('messages-more');
+        if (more) more.textContent = messagesMoreText();
+        if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
+    } catch (error) {
+        if (gen !== messagesGen) return;
+        messagesPaging.failed = true;
+        const more = document.getElementById('messages-more');
+        if (more) more.innerHTML = `Could not load more messages. <button type="button" class="ui-link-row ui-link" onclick="loadMoreMessages(true)">Try again</button>`;
+    } finally {
+        if (gen === messagesGen) messagesPaging.loading = false;
+    }
+    if (gen !== messagesGen || messagesPaging.failed) return;
+    const sentinel = document.getElementById('messages-more');
+    const container = document.getElementById('messages-logs');
+    if (sentinel && container && messagesPaging.cursor && sentinel.getClientRects().length) {
+        const r = sentinel.getBoundingClientRect();
+        const box = container.getBoundingClientRect();
+        if (r.top < Math.max(box.bottom, window.innerHeight) + 600) loadMoreMessages();
+    }
+}
+
 function deduplicateNetfilterLogs(logs) {
     if (!logs || logs.length === 0) return [];
 
@@ -805,7 +1635,6 @@ function deduplicateNetfilterLogs(logs) {
     const uniqueLogs = [];
 
     for (const log of logs) {
-        // Create unique key from message + time + priority
         const key = `${log.message || ''}|${log.time || ''}|${log.priority || ''}`;
 
         if (!seen.has(key)) {
@@ -817,32 +1646,33 @@ function deduplicateNetfilterLogs(logs) {
     return uniqueLogs;
 }
 
-// Render netfilter without loading spinner (for smart refresh)
 function renderNetfilterData(data) {
     const container = document.getElementById('netfilter-logs');
     if (!container) return;
 
     if (!data.data || data.data.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No logs found</p>';
+        container.innerHTML = Object.values(currentFilters.netfilter || {}).some(Boolean) ? `
+            <div class="ui-empty">
+                <p><b>No events match these filters</b></p>
+                <p><button onclick="clearNetfilterFilters()" class="ui-btn ui-btn-sm">Clear filters</button></p>
+            </div>` : '<p class="ui-empty">No events yet. Fail2ban bans, unbans and warnings show up here.</p>';
+        const emptyCount = document.getElementById('security-count');
+        if (emptyCount) emptyCount.textContent = uiCountLabel(0, 'event', 'events');
         return;
     }
 
-    // Deduplicate logs
     const uniqueLogs = deduplicateNetfilterLogs(data.data);
 
-    // Update count display with total count from API (like Messages page)
     const countEl = document.getElementById('security-count');
     if (countEl) {
-        countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
+        countEl.textContent = uiCountLabel(data.total || 0, 'event', 'events');
     }
 
-    // Build a set of currently banned IPs for quick lookup
     const activeBannedIPs = new Set();
     if (fail2banActiveBans && fail2banActiveBans.length > 0) {
         fail2banActiveBans.forEach(function(ban) {
             if (ban.ip) activeBannedIPs.add(ban.ip);
             if (ban.network) {
-                // Extract base IP from network notation like "1.2.3.0/24"
                 const baseIp = ban.network.split('/')[0];
                 activeBannedIPs.add(baseIp);
                 activeBannedIPs.add(ban.network);
@@ -850,50 +1680,46 @@ function renderNetfilterData(data) {
         });
     }
 
+    const mayBan = mailcowRwConfigured && userCan('security', 'write');
+    const lockedNote = mailcowRwConfigured || !userCan('security', 'write') ? '' : `<div class="ui-list-note">${uiLocked('Ban and Unban are locked', `Banning or unbanning an IP from this list ${UI_RW_KEY_TEXT}`)}</div>`;
+
+    const tabCount = document.getElementById('security-tab-n-events');
+    if (tabCount) {
+        tabCount.textContent = data.total ? data.total.toLocaleString() : '';
+        tabCount.classList.toggle('hidden', !data.total);
+    }
+
     container.innerHTML = `
-        <div class="space-y-3">
-            ${uniqueLogs.map(log => {
+        ${lockedNote}
+        <div class="ui-ev-list">
+            <div class="ui-ev-row ui-ev-head"><span>When</span><span>Address</span><span>Account</span><span>Action</span><span>Where</span><span></span></div>
+            ${uniqueLogs.map((log, index) => {
                 const isBan = log.action === 'ban' || log.action === 'banned';
                 const isWarningOrUnban = log.action === 'warning' || log.action === 'unban';
-                // Check if IP is in the blacklist (with or without /32)
-                const ipInBlacklist = log.ip && fail2banBlacklist.some(entry => entry === log.ip || entry === log.ip + '/32');
-                // Show unban if: banned OR already in blacklist
-                const showUnban = mailcowRwConfigured && log.ip && (isBan || ipInBlacklist);
-                // Show ban if: warning/unban AND NOT already in blacklist
-                const showBan = mailcowRwConfigured && log.ip && isWarningOrUnban && !ipInBlacklist;
-                // GeoIP rendering
-                let geoHtml = '';
-                if (log.country_code) {
-                    const flagUrl = getFlagUrl(log.country_code, '16x12');
-                    let geoParts = [];
-                    if (log.country_name && flagUrl) {
-                        geoParts.push('<img src="' + flagUrl + '" alt="' + escapeHtml(log.country_name) + '" style="width:16px;height:12px;display:inline-block;vertical-align:middle" onerror="this.style.display=\'none\'"> ' + escapeHtml(log.country_name));
-                    }
-                    if (log.city) geoParts.push(escapeHtml(log.city));
-                    if (log.asn_org) geoParts.push('(' + escapeHtml(log.asn_org) + ')');
-                    if (geoParts.length > 0) {
-                        geoHtml = '<div class="text-xs text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1 flex-wrap">' +
-                            '<svg class="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>' +
-                            geoParts.join(' ') + '</div>';
-                    }
-                }
+                const ipInBlacklist = log.ip && fail2banBlacklist.some(entry => entry === log.ip || entry === fail2banEntry(log.ip));
+                const showUnban = mayBan && log.ip && (isBan || ipInBlacklist);
+                const showBan = mayBan && log.ip && isWarningOrUnban && !ipInBlacklist;
+                const flagUrl = log.country_code ? getFlagUrl(log.country_code, '16x12') : '';
+                const place = [log.country_name, log.city].filter(Boolean).join(', ');
+                const org = log.asn_org ? ` (${log.asn_org})` : '';
+                const account = log.username && log.username !== '-' ? uiEntity('address', log.username)
+                    : (log.attempts_left !== null && log.attempts_left !== undefined ? `<span class="ui-muted">${escapeHtml(String(log.attempts_left))} attempts left</span>` : '<span class="ui-muted">-</span>');
                 return `
-                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
-                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
-                        <div class="flex flex-wrap items-center gap-2">
-                            <span class="font-mono text-sm font-semibold text-gray-900 dark:text-white">${log.ip ? copyableText(log.ip) : '-'}</span>
-                            ${log.username && log.username !== '-' ? `<span class="text-sm text-blue-600 dark:text-blue-400">${copyableText(log.username)}</span>` : ''}
-                            <span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getActionClass(log.action)}">${getActionLabel(log.action)}</span>
-                            ${log.attempts_left !== null && log.attempts_left !== undefined ? `<span class="text-xs text-gray-500 dark:text-gray-400">${log.attempts_left} attempts left</span>` : ''}
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(log.time)}</span>
-                            ${showUnban ? `<button onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-400 hover:bg-green-200 dark:hover:bg-green-800/60 border border-green-300 dark:border-green-700 transition-colors cursor-pointer" title="Unban ${escapeHtml(log.ip)}/32"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 11V7a4 4 0 118 0m-4 8v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2z"></path></svg>Unban</button>` : ''}
-                            ${showBan ? `<button onclick="banIP('${escapeJsArg(log.ip)}', this)" class="inline-flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-md bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/60 border border-red-300 dark:border-red-700 transition-colors cursor-pointer" title="Ban ${escapeHtml(log.ip)}/32"><svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>Ban</button>` : ''}
-                        </div>
+                <div class="ui-ev-row ui-msg-${uiActionTone(log.action)}">
+                    ${uiTime(log.time, formatListTime(log.time), { title: formatTime(log.time), cls: 'ui-muted' })}
+                    <b class="ui-mono">${log.ip ? uiEntity('ip', log.ip, { mono: true }) : '-'}</b>
+                    <span class="ui-ev-account">${account}</span>
+                    <span>${uiActionTag(log.action)}</span>
+                    <span class="ui-ev-where" title="${escapeHtml(place + org)}">${flagUrl ? `<img src="${flagUrl}" alt="" width="16" height="12" onerror="this.style.display='none'">` : ''}${escapeHtml(place || '-')}</span>
+                    <span class="ui-st-acts">
+                        ${showUnban ? `<button data-acts="security" onclick="unbanIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm" title="Unban ${escapeHtml(log.ip)}">Unban</button>` : ''}
+                        ${showBan ? `<button data-acts="security" onclick="banIP('${escapeJsArg(log.ip)}', this)" class="ui-btn ui-btn-sm ui-btn-danger" title="Put ${escapeHtml(fail2banEntry(log.ip))} on the denylist; it stays until removed">Ban permanently</button>` : ''}
+                        <button type="button" class="ui-icon-btn ui-icon-btn-sm ui-ev-toggle" aria-expanded="false" aria-controls="ev-detail-${index}" title="Show the log line" onclick="toggleEventDetail(this)"><svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg></button>
+                    </span>
+                    <div class="ui-ev-detail" id="ev-detail-${index}" hidden>
+                        <p class="ui-mono">${escapeHtml(log.message || '-')}</p>
+                        ${place || org ? `<p class="ui-muted">${escapeHtml([log.country_name, log.city].filter(Boolean).join(' '))}${escapeHtml(org)}</p>` : ''}
                     </div>
-                    <p class="text-sm text-gray-700 dark:text-gray-300 break-words">${escapeHtml(log.message || '-')}</p>
-                    ${geoHtml}
                 </div>`;
             }).join('')}
         </div>
@@ -901,9 +1727,27 @@ function renderNetfilterData(data) {
     `;
 }
 
+function toggleEventDetail(btn) {
+    const detail = document.getElementById(btn.getAttribute('aria-controls'));
+    if (!detail) return;
+    detail.hidden = !detail.hidden;
+    btn.setAttribute('aria-expanded', !detail.hidden);
+}
+
+function fail2banEntry(ip) {
+    return ip.includes('/') ? ip : `${ip}/${ip.includes(':') ? 128 : 32}`;
+}
+
+function fail2banBare(entry) {
+    const value = String(entry || '');
+    return value.replace(value.includes(':') ? /\/128$/ : /\/32$/, '');
+}
+
 async function unbanIP(ip, btnEl) {
-    const ipWithMask = ip.includes('/') ? ip : ip + '/32';
-    if (!await showConfirmModal({ title: 'Unban IP', message: 'Unban IP ' + ipWithMask + '?', confirmText: 'Unban' })) return;
+    if (!uiMayAct('security')) return;
+    const label = btnEl ? btnEl.textContent : '';
+    const ipWithMask = fail2banEntry(ip);
+    if (!await showConfirmModal({ title: 'Unban IP', message: 'Unban ' + ip + '? If it is part of a network ban, the whole network is unbanned.', confirmText: 'Unban', focusCancel: true })) return;
     try {
         if (btnEl) {
             btnEl.disabled = true;
@@ -914,33 +1758,81 @@ async function unbanIP(ip, btnEl) {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ip: ipWithMask })
         });
-        const result = await res.json();
-        if (res.ok && result.status === 'success') {
-            showToast('IP ' + ip + ' unbanned successfully', 'success');
-            // Refresh fail2ban data and netfilter logs
-            fail2banSettingsLoaded = false;
-            fail2banActiveBans = null;
-            loadFail2BanSettings();
+        const result = await uiReadJson(res);
+        if (res.ok && result && result.status === 'success') {
+            const lifted = result.networks || [ipWithMask];
+            showToast(lifted.map(fail2banBare).join(', ') + ' queued for unbanning', 'success');
+            if (fail2banActiveBans) fail2banActiveBans = fail2banActiveBans.filter(b => !lifted.includes(b.network) && fail2banBare(b.ip || b.network) !== fail2banBare(ip));
+            renderSecurityOverview();
+            refreshSecurityAddresses();
+            setTimeout(() => { fail2banSettingsLoaded = false; loadFail2BanSettings(); }, 5000);
             smartRefreshNetfilter();
         } else {
-            showToast('Failed to unban: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+            showToast('Could not unban the IP: ' + actionErrorText(res, result), 'error');
             if (btnEl) {
                 btnEl.disabled = false;
-                btnEl.textContent = 'Unban';
+                btnEl.textContent = label;
             }
         }
     } catch (err) {
-        showToast('Failed to unban IP: ' + err.message, 'error');
+        showToast('Could not unban the IP: ' + uiErrorText(err), 'error');
         if (btnEl) {
             btnEl.disabled = false;
-            btnEl.textContent = 'Unban';
+            btnEl.textContent = label;
         }
     }
 }
 
+function fail2banLiftable() {
+    if (!fail2banActiveBans) return [];
+    const permanent = new Set(fail2banPermBans.map(b => b && (b.network || b.ip)));
+    const queued = v => v === true || v === 1 || v === '1';
+    const plain = n => typeof n === 'string' && /^[0-9A-Fa-f.:]+\/\d{1,3}$/.test(n);
+    return [...new Set(fail2banActiveBans.filter(b => b && plain(b.network) && !permanent.has(b.network) && !queued(b.queued_for_unban)).map(b => b.network))];
+}
+
+async function unbanAllFail2ban(btnEl) {
+    if (!uiMayAct('security')) return;
+    const n = fail2banLiftable().length;
+    if (!n) return;
+    const bans = `${n.toLocaleString()} ban${n === 1 ? '' : 's'}`;
+    if (!await showConfirmModal({
+        title: 'Unban all?',
+        message: `Fail2ban lifts its ${bans}, and those addresses can try to sign in again.\nBans by the protection rules and the denylist stay.`,
+        confirmText: `Unban ${n.toLocaleString()}`, isDangerous: true, focusCancel: true,
+    })) return;
+    const label = btnEl ? btnEl.textContent : '';
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = 'Unbanning...';
+    }
+    let result = {};
+    try {
+        const res = await authenticatedFetch('/api/fail2ban/unban-all', { method: 'POST' });
+        result = (await uiReadJson(res)) || {};
+        if (!res.ok || result.status !== 'success') result = { ...result, status: 'error', msg: actionErrorText(res, result) };
+    } catch (err) {
+        result = { status: 'error', msg: uiErrorText(err) };
+    }
+    const lifted = result.networks || [];
+    if (result.status === 'success') showToast(result.msg, 'success');
+    else showToast('Unban all: ' + result.msg, 'error');
+    if (lifted.length && fail2banActiveBans) fail2banActiveBans = fail2banActiveBans.filter(b => !lifted.includes(b.network));
+    if (btnEl && document.body.contains(btnEl)) {
+        btnEl.disabled = false;
+        btnEl.textContent = label;
+    }
+    renderSecurityOverview();
+    refreshSecurityAddresses();
+    setTimeout(() => { fail2banSettingsLoaded = false; loadFail2BanSettings(); }, 5000);
+    smartRefreshNetfilter();
+}
+
 async function banIP(ip, btnEl) {
-    const ipWithMask = ip.includes('/') ? ip : ip + '/32';
-    if (!await showConfirmModal({ title: 'Ban IP', message: `Are you sure you want to permanently ban ${ipWithMask}?\n\nThis will add the IP to the Fail2Ban blacklist.`, confirmText: 'Ban', isDangerous: true })) return;
+    if (!uiMayAct('security')) return;
+    const label = btnEl ? btnEl.textContent : '';
+    const ipWithMask = fail2banEntry(ip);
+    if (!await showConfirmModal({ title: 'Ban IP', message: `Add ${ipWithMask} to the Fail2ban denylist? It stays banned until removed.`, confirmText: 'Ban', isDangerous: true, focusCancel: true })) return;
 
     if (btnEl) {
         btnEl.disabled = true;
@@ -954,28 +1846,61 @@ async function banIP(ip, btnEl) {
             body: JSON.stringify({ ip: ipWithMask })
         });
 
-        const result = await response.json();
+        const result = await uiReadJson(response);
 
-        if (result.status === 'success') {
-            showToast(`IP ${ip} added to blacklist`, 'success');
-            // Refresh fail2ban data and netfilter logs
+        if (response.ok && result && result.status === 'success') {
+            showToast(result.already ? result.msg : `IP ${ip} added to the denylist`, 'success');
             fail2banSettingsLoaded = false;
             fail2banActiveBans = null;
             loadFail2BanSettings();
             smartRefreshNetfilter();
+            return true;
         } else {
-            showToast('Failed to ban: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+            showToast('Could not ban the IP: ' + actionErrorText(response, result), 'error');
             if (btnEl) {
                 btnEl.disabled = false;
-                btnEl.textContent = 'Ban';
+                btnEl.textContent = label;
             }
         }
     } catch (err) {
-        showToast('Failed to ban IP: ' + err.message, 'error');
+        showToast('Could not ban the IP: ' + uiErrorText(err), 'error');
         if (btnEl) {
             btnEl.disabled = false;
-            btnEl.textContent = 'Ban';
+            btnEl.textContent = label;
         }
+    }
+}
+
+async function allowIP(ip, btnEl) {
+    if (!uiMayAct('security')) return;
+    const label = btnEl ? btnEl.textContent : '';
+    const ipWithMask = fail2banEntry(ip);
+    if (!await showConfirmModal({ title: 'Allow IP', message: `Add ${ipWithMask} to the Fail2ban allowlist? It is exempt from bans unless also on the denylist.`, confirmText: 'Allow', focusCancel: true })) return;
+    if (btnEl) {
+        btnEl.disabled = true;
+        btnEl.textContent = 'Allowing...';
+    }
+    try {
+        const res = await authenticatedFetch('/api/fail2ban/allow', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ip: ipWithMask })
+        });
+        const result = await uiReadJson(res);
+        if (res.ok && result && result.status === 'success') {
+            showToast(result.already ? result.msg : `IP ${ip} added to the allowlist`, 'success');
+            fail2banSettingsLoaded = false;
+            fail2banActiveBans = null;
+            loadFail2BanSettings();
+            return true;
+        }
+        showToast('Could not add the IP to the allowlist: ' + actionErrorText(res, result), 'error');
+    } catch (err) {
+        showToast('Could not add the IP to the allowlist: ' + uiErrorText(err), 'error');
+    }
+    if (btnEl) {
+        btnEl.disabled = false;
+        btnEl.textContent = label;
     }
 }
 
@@ -989,11 +1914,9 @@ async function loadNetfilterCountries() {
         
         const countries = await response.json();
         
-        // Preserve current selection
         const currentValue = select.value;
         
-        // Clear existing options except the "All Countries" default
-        select.innerHTML = '<option value="">All Countries</option>';
+        select.innerHTML = '<option value="" data-short="All">All Countries</option>';
         
         for (const c of countries) {
             const opt = document.createElement('option');
@@ -1002,14 +1925,13 @@ async function loadNetfilterCountries() {
             select.appendChild(opt);
         }
         
-        // Restore selection
         if (currentValue) select.value = currentValue;
+        uiFilterBarSync();
     } catch (err) {
         console.error('Failed to load netfilter countries:', err);
     }
 }
 
-// Smart refresh for Netfilter
 async function smartRefreshNetfilter() {
     const filters = currentFilters.netfilter || {};
     const params = new URLSearchParams({
@@ -1026,33 +1948,44 @@ async function smartRefreshNetfilter() {
     if (hasDataChanged(data, 'netfilter')) {
         console.log('[REFRESH] Netfilter data changed, updating UI');
         lastDataCache.netfilter = data;
-        // Use renderNetfilterData to update content without loading spinner (like Messages page)
         renderNetfilterData(data);
     }
 }
 
 
-// Smart refresh for Queue
 async function smartRefreshQueue() {
+    if (queueActing) return;
+    const id = ++queueAsked;
+    const kept = queueListKept();
     const response = await authenticatedFetch('/api/queue');
     if (!response.ok) return;
 
     const data = await response.json();
+    await rwStatusReady;
+    const listKept = await kept;
+    if (queueActing || !queueTakeTurn(id)) return;
+    const suppressChanged = listKept !== queueSuppressOn;
+    queueSuppressOn = listKept;
 
-    if (hasDataChanged(data, 'queue')) {
+    if (hasDataChanged(data, 'queue') || suppressChanged || queueLoading) {
+        queueLoading = false;
         console.log('[REFRESH] Queue data changed, updating UI');
         lastDataCache.queue = data;
         allQueueData = data.data || [];
+        updateQueueSummary();
         applyQueueFilters();
     }
 }
 
-// Smart refresh for Quarantine
 async function smartRefreshQuarantine() {
-    const response = await authenticatedFetch('/api/quarantine');
+    if (quarantineActing) return;
+    const id = ++quarantineAsked;
+    const response = await authenticatedFetch('/api/quarantine', { timeout: PAGE_REFRESH_TIMEOUT });
     if (!response.ok) return;
 
     const data = await response.json();
+    await rwStatusReady;
+    if (quarantineActing || !quarantineTakeTurn(id)) return;
 
     if (hasDataChanged(data, 'quarantine')) {
         console.log('[REFRESH] Quarantine data changed, updating UI');
@@ -1061,39 +1994,24 @@ async function smartRefreshQuarantine() {
     }
 }
 
-// Smart refresh for Dashboard
+let dashboardKpisAt = 0;
+
 async function smartRefreshDashboard() {
     try {
-        const response = await authenticatedFetch('/api/stats/dashboard');
-        if (!response.ok) return;
-
-        const data = await response.json();
-
-        if (hasDataChanged(data, 'dashboard')) {
-            console.log('[REFRESH] Dashboard data changed, updating UI');
-            lastDataCache.dashboard = data;
-
-            // Update stats without full reload
-            document.getElementById('stat-messages-24h').textContent = data.messages['24h'].toLocaleString();
-            document.getElementById('stat-messages-7d').textContent = data.messages['7d'].toLocaleString();
-            document.getElementById('stat-blocked-24h').textContent = data.blocked['24h'].toLocaleString();
-            document.getElementById('stat-blocked-7d').textContent = data.blocked['7d'].toLocaleString();
-            document.getElementById('stat-blocked-percentage').textContent = data.blocked.percentage_24h;
-            document.getElementById('stat-deferred-24h').textContent = data.deferred['24h'].toLocaleString();
-            document.getElementById('stat-deferred-7d').textContent = data.deferred['7d'].toLocaleString();
-            document.getElementById('stat-auth-failures-24h').textContent = data.auth_failures['24h'].toLocaleString();
-            document.getElementById('stat-auth-failures-7d').textContent = data.auth_failures['7d'].toLocaleString();
-        }
-
-        // Also refresh recent activity and status summary
-        loadRecentActivity();
+        refreshMailFlowChart();
         loadDashboardStatusSummary();
+        loadDashboardSecurity();
+        if (Date.now() - dashboardTrendsAt >= 300000) loadDashboardTrends();
+        if (Date.now() - dashboardKpisAt >= 300000) {
+            dashboardKpisAt = Date.now();
+            loadDashboardBlacklistSummary();
+            loadDashboardHealth();
+        }
     } catch (error) {
         console.error('Dashboard refresh error:', error);
     }
 }
 
-// Smart refresh for Settings
 async function smartRefreshSettings() {
     try {
         const response = await authenticatedFetch('/api/settings/info');
@@ -1107,20 +2025,18 @@ async function smartRefreshSettings() {
                     const editableData = await editableRes.json();
                     data.editable_config = editableData.configuration || {};
                 }
-            } catch (e) { /* ignore */ }
+            } catch (e) {}
         }
 
         if (hasDataChanged(data, 'settings')) {
             const content = document.getElementById('settings-content');
             if (content && !content.classList.contains('hidden') && content.querySelector('#settings-edit-form')) {
-                // User is on Settings tab with edit form open - skip auto-refresh to avoid interrupting (e.g. switching tabs)
                 return;
             }
             console.log('[REFRESH] Settings data changed, updating UI');
             lastDataCache.settings = data;
 
             if (content && !content.classList.contains('hidden')) {
-                // Preserve version info from cache (don't reload it on smart refresh)
                 if (versionInfoCache.app_version) {
                     data.app_version = versionInfoCache.app_version;
                 }
@@ -1136,86 +2052,77 @@ async function smartRefreshSettings() {
     }
 }
 
-// =============================================================================
-// TAB SWITCHING
-// =============================================================================
-
 function switchTab(tab, params = {}) {
     console.log('Switching to tab:', tab, 'params:', params);
 
-    // Block disabled features - show a "Feature Disabled" page.
-    // Exception: the Mailbox Stats page also hosts Rate Limits, so it stays
-    // open while that feature is on, even with Mailbox Stats itself off.
-    const hostsEnabledRateLimits = tab === 'mailbox-stats'
-        && !window.disabledFeatures.includes('rate-limits');
-    if (window.disabledFeatures.includes(tab) && !hostsEnabledRateLimits) {
+    if (tab === 'dashboard' && !userCanView('dashboard') && landingPage()) {
+        tab = landingPage();
+        params = {};
+        if (typeof buildPath === 'function') routerReplace({ route: tab, params }, buildPath(tab, params));
+    }
+
+    if (!userCanView(tab)) {
+        showNoAccessPage(tab);
+        return;
+    }
+
+    if (pageIsOff(tab)) {
         const feature = TOGGLEABLE_FEATURES.find(f => f.id === tab);
-        const featureLabel = feature ? feature.label : tab;
+        const featureLabel = feature ? feature.label : (TAB_LABELS[tab] || tab);
         console.warn(`Feature '${tab}' is disabled`);
 
         currentTab = tab;
 
-        // Hide all tab contents
         document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
 
-        // Show current tab with a disabled message
         const tabContent = document.getElementById(`content-${tab}`);
         if (tabContent) {
             tabContent.classList.remove('hidden');
             tabContent.innerHTML = `
-                <div class="flex items-center justify-center min-h-[60vh]">
-                    <div class="text-center max-w-md">
-                        <div class="w-16 h-16 mx-auto mb-6 rounded-full bg-gray-100 dark:bg-gray-700 flex items-center justify-center">
-                            <svg class="w-8 h-8 text-gray-400 dark:text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                                    d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
-                            </svg>
-                        </div>
-                        <h2 class="text-xl font-semibold text-gray-700 dark:text-gray-300 mb-2">${escapeHtml(featureLabel)} is disabled</h2>
-                        <p class="text-gray-500 dark:text-gray-400 mb-6">This feature has been turned off by the administrator in Settings → Application → Features.</p>
-                        <button onclick="navigateTo('dashboard')"
-                            class="px-5 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-lg text-sm font-medium transition-colors">
-                            Go to Dashboard
-                        </button>
-                    </div>
+                <div class="ui-disabled-page">
+                    ${uiLocked(`${featureLabel} is disabled`, 'This feature has been turned off by the administrator in Settings → Features.',
+                        `<button onclick="navigateTo('dashboard')" class="ui-btn ui-btn-primary">Go to Dashboard</button>`)}
                 </div>`;
         }
 
-        // Update URL to reflect the disabled page (don't silently change to dashboard)
         const newPath = typeof buildPath === 'function' ? buildPath(tab) : `/${tab}`;
         if (window.location.pathname !== newPath) {
-            history.replaceState({ route: tab, params: {} }, '', newPath);
+            routerReplace({ route: tab, params: {} }, newPath);
         }
+        queueDocumentTitle();
+        return;
+    }
+
+    const tabPage = typeof SUBPAGES !== 'undefined' ? SUBPAGES[tab] : null;
+    const pageEl = document.getElementById(`content-${tab}`);
+    if (tabPage && params.sub && currentTab === tab && pageEl && !pageEl.classList.contains('hidden')) {
+        tabPage.show(params.sub);
         return;
     }
 
     currentTab = tab;
+    pageRefreshLoaded(tab);
 
-    // Update active tab button (desktop)
-    document.querySelectorAll('[id^="tab-"]').forEach(btn => {
-        btn.classList.remove('tab-active');
-        btn.classList.add('text-gray-500', 'dark:text-gray-400');
-    });
-    const activeBtn = document.getElementById(`tab-${tab}`);
-    if (activeBtn) {
-        activeBtn.classList.add('tab-active');
-        activeBtn.classList.remove('text-gray-500', 'dark:text-gray-400');
+    document.querySelectorAll('[id^="tab-"], [id^="tabbar-"]').forEach(btn => btn.removeAttribute('aria-current'));
+    for (const id of [`tab-${tab}`, `tabbar-${tab}`]) {
+        const btn = document.getElementById(id);
+        if (btn) btn.setAttribute('aria-current', 'page');
     }
+    const moreBtn = document.getElementById('hamburger-btn');
+    if (moreBtn) moreBtn.classList.toggle('ui-more-current', !document.getElementById(`tabbar-${tab}`));
 
-    // Update mobile menu state and label
     if (typeof updateMobileMenuActiveState === 'function') {
         updateMobileMenuActiveState(tab);
     }
     if (typeof updateCurrentTabLabel === 'function') {
         updateCurrentTabLabel(tab);
     }
+    placeTopbar(tab);
 
-    // Hide all tab contents
     document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.add('hidden');
     });
 
-    // Show current tab content
     const tabContent = document.getElementById(`content-${tab}`);
     if (tabContent) {
         tabContent.classList.remove('hidden');
@@ -1223,9 +2130,13 @@ function switchTab(tab, params = {}) {
         console.error(`Tab content not found: content-${tab}`);
     }
 
-    // Load tab data
+    if (tabPage) {
+        const sub = params.sub || tabPage.current();
+        routerSyncSubpage(tab, sub, true);
+        tabPage.select(sub);
+    }
+
     console.log('Loading data for tab:', tab);
-    // Disconnect log WebSocket when switching away from logs
     if (tab !== 'logs' && typeof disconnectLogWebSocket === 'function') {
         disconnectLogWebSocket();
     }
@@ -1235,21 +2146,28 @@ function switchTab(tab, params = {}) {
             loadDashboard();
             break;
         case 'messages':
-            loadMessages(1);
+            leaveMessagesWithoutId();
+            if (messagesOpening) messagesOpening();
+            loadMessages();
             break;
         case 'netfilter':
+            loadSecurityOverview();
             loadNetfilterLogs(1);
             loadFail2BanSettings();
+            if (typeof loadProtection === 'function') loadProtection();
             loadNetfilterCountries();
             loadSmtpAbusePanel();
-            loadSecurityCountryChart(30);
+            loadSecurityAppSettings();
             break;
-        case 'queue':
-            loadQueue();
+        case 'outbound':
+            loadOutbound();
             break;
         case 'quarantine':
             loadQuarantine();
             initQuarantineRules();
+            break;
+        case 'rspamd':
+            loadRspamdMaps();
             break;
         case 'status':
             loadStatus();
@@ -1258,10 +2176,13 @@ function switchTab(tab, params = {}) {
             loadDomains();
             break;
         case 'dmarc':
-            handleDmarcRoute(params);
+            handleDmarcRoute(Object.keys(params).length ? params : parseRoute().params);
             break;
         case 'mailbox-stats':
             initMailboxStatsPage();
+            break;
+        case 'devices':
+            loadDevices();
             break;
         case 'logs':
             loadLogViewer();
@@ -1269,127 +2190,1186 @@ function switchTab(tab, params = {}) {
         case 'settings':
             loadSettings();
             break;
-        case 'spam-filter':
-            loadSpamFilter();
+        case 'about':
+            loadAbout();
             break;
         default:
             console.warn('Unknown tab:', tab);
     }
+    queueDocumentTitle();
 }
 
-async function refreshAllData() {
-    if (currentTab === 'dmarc') {
-        try {
-            await authenticatedFetch('/api/dmarc/cache/clear', { method: 'POST' });
-            console.log('DMARC cache cleared');
-        } catch (e) {
-            console.error('Failed to clear DMARC cache:', e);
-        }
+function showNoAccessPage(tab) {
+    currentTab = tab;
+    if (typeof disconnectLogWebSocket === 'function') disconnectLogWebSocket();
+    document.querySelectorAll('[id^="tab-"], [id^="tabbar-"]').forEach(btn => btn.removeAttribute('aria-current'));
+    document.querySelectorAll('.tab-content').forEach(c => c.classList.add('hidden'));
+    if (typeof updateMobileMenuActiveState === 'function') updateMobileMenuActiveState(tab);
+    if (typeof updateCurrentTabLabel === 'function') updateCurrentTabLabel(tab);
+    placeTopbar(null);
+    const page = document.getElementById('content-no-access');
+    if (page) {
+        const landing = landingPage();
+        const go = landing && landing !== tab
+            ? `<button type="button" onclick="navigateTo('${landing}')" class="ui-btn ui-btn-primary">Go to ${escapeHtml(TAB_LABELS[landing] || landing)}</button>` : '';
+        page.innerHTML = `
+            <div class="ui-disabled-page">
+                ${uiLocked('You do not have permission to view this page.', 'Ask an administrator if you need it.', go)}
+            </div>`;
+        page.classList.remove('hidden');
     }
-    switchTab(currentTab);
+    queueDocumentTitle();
 }
-
-// =============================================================================
-// DASHBOARD
-// =============================================================================
 
 async function loadDashboard() {
     try {
         console.log('Loading Dashboard...');
-
-        const response = await authenticatedFetch('/api/stats/dashboard');
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        console.log('Dashboard data:', data);
-
-        document.getElementById('stat-messages-24h').textContent = data.messages['24h'].toLocaleString();
-        document.getElementById('stat-messages-7d').textContent = data.messages['7d'].toLocaleString();
-        document.getElementById('stat-blocked-24h').textContent = data.blocked['24h'].toLocaleString();
-        document.getElementById('stat-blocked-7d').textContent = data.blocked['7d'].toLocaleString();
-        document.getElementById('stat-blocked-percentage').textContent = data.blocked.percentage_24h;
-        document.getElementById('stat-deferred-24h').textContent = data.deferred['24h'].toLocaleString();
-        document.getElementById('stat-deferred-7d').textContent = data.deferred['7d'].toLocaleString();
-        document.getElementById('stat-auth-failures-24h').textContent = data.auth_failures['24h'].toLocaleString();
-        document.getElementById('stat-auth-failures-7d').textContent = data.auth_failures['7d'].toLocaleString();
-
-        loadRecentActivity();
         loadDashboardStatusSummary();
         loadDashboardBlacklistSummary();
-        loadDashboardSecurityAlerts();
+        loadDashboardHealth();
+        dashboardKpisAt = Date.now();
+        renderAttention();
+        attentionRefresh();
+        loadDashboardSecurity();
+        loadDashboardTrends();
+        loadMailFlowChart();
     } catch (error) {
         console.error('Failed to load dashboard:', error);
     }
 }
 
-async function loadDashboardSecurityAlerts() {
-    const container = document.getElementById('dashboard-security-alerts');
-    if (!container) return;
+const ATTENTION_ALERTS_EVERY = 30000;
+const ATTENTION_CHECKS_EVERY = 5 * 60 * 1000;
+const ATTENTION_CHECKS = ['connection', 'blocklist', 'containers', 'fail2ban', 'dmarc', 'appVersion', 'mailcowVersion'];
+const attention = {
+    ready: false,
+    timeout: 20000,
+    alerts: { seq: 0, busy: null, latest: null, at: 0, ok: null, list: [], total: 0, critical: 0 },
+    checks: { seq: 0, busy: null, latest: null, at: 0, ok: {}, items: {} },
+};
+
+const dashboardAlerts = new Map();
+let dashboardWritableAlertIds = [];
+
+const ALERT_TYPE_AREAS = {
+    volume_spike: 'security', auth_failure_burst: 'security', smtp_abuse_block: 'security',
+    protection_breach: 'security', protection_ban_failed: 'security',
+    dns_change: 'domains', dmarc_import_failed: 'dmarc',
+};
+const ALERT_ACTIVITY_TYPES = ['volume_spike', 'auth_failure_burst', 'smtp_abuse_block'];
+const ALERT_OPEN_LABELS = {
+    dns_change: 'Open domain', dmarc_import_failed: 'Open fetch history',
+    protection_breach: 'Open Security', protection_ban_failed: 'Open Security',
+};
+
+function alertArea(alert) {
+    return (alert && ALERT_TYPE_AREAS[alert.alert_type]) || 'admin';
+}
+
+function attentionLoad(state, force, read) {
+    if (state.busy && !force) return state.busy;
+    const seq = ++state.seq;
+    const run = (async () => {
+        const answer = await read();
+        if (seq !== state.seq) return state.latest;
+        return answer();
+    })();
+    state.busy = run;
+    state.latest = run;
+    run.finally(() => { if (state.busy === run) state.busy = null; });
+    return run;
+}
+
+async function attentionRead(url) {
     try {
-        const response = await authenticatedFetch('/api/security-alerts?acknowledged=false&limit=20');
-        if (!response.ok) { container.classList.add('hidden'); return; }
-        const data = await response.json();
-        const alerts = data.alerts || [];
-        if (alerts.length === 0) {
-            container.classList.add('hidden');
-            container.innerHTML = '';
+        const res = await authenticatedFetch(url, { timeout: attention.timeout });
+        return res.ok ? await res.json() : READ_FAILED;
+    } catch (e) {
+        console.warn(`Needs attention could not read ${url}:`, e);
+        return READ_FAILED;
+    }
+}
+
+function loadDashboardSecurityAlerts({ force = true } = {}) {
+    const s = attention.alerts;
+    return attentionLoad(s, force, async () => {
+        const read = userCan('alerts') ? await attentionRead('/api/security-alerts?acknowledged=false&limit=20') : { alerts: [] };
+        const data = read === READ_FAILED ? null : read;
+        return () => {
+            s.at = Date.now();
+            if (!data) { s.ok = false; renderAttention(); return false; }
+            const alerts = data.alerts || [];
+            s.ok = true;
+            s.list = alerts;
+            s.total = Number.isFinite(data.unacknowledged_count) ? data.unacknowledged_count : alerts.length;
+            s.critical = Number.isFinite(data.unacknowledged_critical) ? data.unacknowledged_critical
+                : alerts.filter(a => a.severity === 'critical').length;
+            dashboardAlerts.clear();
+            alerts.forEach(a => dashboardAlerts.set(Number(a.id), a));
+            dashboardWritableAlertIds = Array.isArray(data.writable_ids) ? data.writable_ids.map(Number) : [];
+            renderAttention();
+            return true;
+        };
+    });
+}
+
+function renderDismissAll(button) {
+    if (!button) return;
+    const count = dashboardWritableAlertIds.length, n = count.toLocaleString();
+    const words = count === 1 ? ['Dismiss 1', 'alert'] : [`Dismiss all ${n}`, 'alerts'];
+    button.innerHTML = `${words[0]}<span class="ui-attn-wide">&nbsp;${words[1]}</span>`;
+    button.setAttribute('aria-label', words.join(' '));
+    button.classList.toggle('is-off', !attention.alerts.list.length || !count);
+}
+
+function attentionAlertLine(a) {
+    if (!ALERT_ACTIVITY_TYPES.includes(a.alert_type)) return String(a.detail || '').split('\n')[0];
+    const num = v => (v === null || v === undefined || v === '' ? NaN : Number(v));
+    const raw = num(a.metric_value);
+    const count = Number.isFinite(raw) && raw >= 0 ? Math.round(raw) : null;
+    const detail = String(a.detail || '');
+    const found = detail.match(a.alert_type === 'smtp_abuse_block' ? /\bin (\d+) minutes?\b/ : /\bin the last (\d+) minutes?\b/);
+    const minutes = found && Number(found[1]) > 0 ? Number(found[1]) : null;
+    const n = value => value.toLocaleString();
+    const period = minutes ? ` in ${n(minutes)} ${minutes === 1 ? 'minute' : 'minutes'}` : '';
+    const messages = c => `${n(c)} ${c === 1 ? 'message' : 'messages'}`;
+    if (a.alert_type === 'volume_spike') {
+        if (count === null) return 'Unusual sending was detected.';
+        const usual = num(a.baseline_value);
+        const ratio = minutes && Number.isFinite(usual) && usual > 0 ? Math.round((raw * 60 / minutes) / usual) : NaN;
+        return `Sent ${messages(count)}${period}${Number.isFinite(ratio) && ratio > 1 ? `, about ${n(ratio)} times usual` : ''}.`;
+    }
+    if (a.alert_type === 'auth_failure_burst') {
+        if (count === null) return 'Repeated sign-in failures were detected.';
+        return `${n(count)} failed ${count === 1 ? 'sign-in' : 'sign-ins'}${period}.`;
+    }
+    if (a.alert_type === 'smtp_abuse_block') {
+        if (count === null) return 'Sending was stopped by abuse protection.';
+        return `Sending stopped after ${messages(count)}${period}.`;
+    }
+    return '';
+}
+
+function attentionAlertRows(where) {
+    return attention.alerts.list.map(a => {
+        const id = Number(a.id);
+        const critical = a.severity === 'critical';
+        const first = where === 'bell' ? 'attnBellOpen();' : '';
+        const label = ALERT_OPEN_LABELS[a.alert_type];
+        const place = where === 'bell' ? 'bell' : 'page';
+        const activity = !label && ALERT_ACTIVITY_TYPES.includes(a.alert_type);
+        const action = label ? `openStoredAlert(${id}, '${place}')` : activity ? `${first} openAlertActivity(${id})` : '';
+        const button = label ? `<button type="button" onclick="openStoredAlert(${id}, '${place}')" class="ui-btn ui-btn-sm">${escapeHtml(label)}</button>`
+            : activity ? `<button type="button" onclick="${first} openAlertActivity(${id})" class="ui-btn ui-btn-sm" title="What happened before and around this alert">Show activity</button>` : '';
+        return `
+            <div class="ui-alert${action ? ' ui-alert-go' : ''} ${critical ? 'ui-alert-fail' : 'ui-alert-warn'}" data-key="alert-${id}" data-swipe${action ? ` onclick="if (uiAlertRowClick(event)) { ${action} }"` : ''}>
+                <div class="ui-alert-text">
+                    <div class="ui-alert-title">
+                        <span class="ui-tag ${critical ? 'ui-tag-fail' : 'ui-tag-warn'}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span>
+                        <b>${escapeHtml(a.title)}</b>
+                    </div>
+                    <p>${escapeHtml(attentionAlertLine(a))}</p>
+                    <p class="ui-muted">${escapeHtml(formatTime(a.created_at))}</p>
+                </div>
+                ${button && where !== 'bell' ? `<div class="ui-alert-acts">${button}</div>` : ''}
+                <button type="button" onclick="acknowledgeSecurityAlertOnce(${id}, this)" class="ui-icon-btn ui-icon-btn-sm ui-alert-x" title="Dismiss alert" aria-label="Dismiss alert" data-acts="alerts ${alertArea(a)}">${UI_CLOSE_ICON}</button>
+            </div>`;
+    }).join('');
+}
+
+const ALERT_OPEN = {
+    dns_change: { go: () => navigateTo('domains'), then: a => showAlertDomain(a.subject) },
+    dmarc_import_failed: { go: () => navigateTo('dmarc'), then: () => {
+        if (!(window.disabledFeatures || []).includes('dmarc')) showDmarcSyncHistory();
+    } },
+    protection_breach: { go: openAlertSecurityReview },
+    protection_ban_failed: { go: openAlertSecurityReview },
+};
+
+async function openStoredAlert(alertId, where) {
+    const alert = dashboardAlerts.get(Number(alertId));
+    const place = alert && ALERT_OPEN[alert.alert_type];
+    if (!place) return;
+    const moved = await place.go(alert);
+    if (!moved) return;
+    if (where === 'bell' && attnWindow) attnWindowClose({ toPage: true });
+    if (place.then) await place.then(alert);
+}
+
+async function showAlertDomain(name) {
+    if (!(await domainsLoading) || !name) return;
+    if (document.getElementById('domain-search-input')) clearDomainFilters();
+    const id = domainRowId(name);
+    const details = document.getElementById(`${id}-details`);
+    if (!details) {
+        showToast(`${name} is not in the domain list any more.`, 'info');
+        return;
+    }
+    if (details.classList.contains('hidden')) toggleDomainDetails(id);
+    const row = [...document.querySelectorAll('[data-domain-row]')].find(el => el.dataset.domainRow === name);
+    (row || details).scrollIntoView({ block: 'start' });
+}
+
+async function openAlertSecurityReview() {
+    if (!(await navigateTo('netfilter', { sub: 'overview' }))) return false;
+    securityCountry = null;
+    securityNetwork = null;
+    setSecurityFilter('review');
+    return true;
+}
+
+function uiAlertRowClick(event) {
+    return !event.target.closest('button, a') && !uiRowHeld(event);
+}
+
+function attentionStatus() {
+    const a = attention.alerts, c = attention.checks;
+    const items = ATTENTION_CHECKS.flatMap(k => c.items[k] || []);
+    const total = items.length + a.total;
+    const tone = items.some(i => i.tone === 'fail') || a.critical > 0 ? 'fail'
+        : items.some(i => i.tone === 'warn') || a.total > 0 ? 'warn' : 'info';
+    const failed = a.ok === false || ATTENTION_CHECKS.some(k => c.ok[k] === false);
+    const loading = a.ok === null || ATTENTION_CHECKS.some(k => c.ok[k] === undefined);
+    return { total, tone, failed, loading };
+}
+
+function renderAttentionNote(el, status) {
+    if (!el) return;
+    const html = status.failed
+        ? 'Some checks could not run. <button type="button" class="ui-link-row ui-link" onclick="attentionRetry()">Try again</button>'
+        : !status.loading && status.total === 0 ? 'Nothing needs attention right now.' : '';
+    if (el.dataset.shown !== html) {
+        el.innerHTML = html;
+        el.dataset.shown = html;
+    }
+    el.classList.toggle('hidden', !html);
+}
+
+function attentionRetry() {
+    if (attention.alerts.ok === false) loadDashboardSecurityAlerts();
+    if (ATTENTION_CHECKS.some(k => attention.checks.ok[k] === false)) loadDashboardAttention();
+}
+
+function updateAttentionState() {
+    const status = attentionStatus();
+    const count = document.getElementById('dashboard-attention-count');
+    if (count) count.textContent = status.total ? status.total.toLocaleString() : '';
+    const winCount = document.getElementById('attn-win-count');
+    if (winCount) winCount.textContent = status.total ? status.total.toLocaleString() : '';
+    renderAttentionNote(document.getElementById('dashboard-attention-clear'), status);
+    renderAttentionNote(document.getElementById('attn-win-state'), status);
+    renderDismissAll(document.getElementById('dashboard-dismiss-all'));
+    renderDismissAll(document.getElementById('attn-win-dismiss-all'));
+    document.querySelectorAll('.ui-attn-scroll').forEach(scroll => {
+        const overflows = scroll.scrollHeight > scroll.clientHeight + 1;
+        scroll.classList.toggle('has-more', overflows && scroll.scrollTop + scroll.clientHeight < scroll.scrollHeight - 2);
+        scroll.tabIndex = overflows || scroll.id === 'attn-win-scroll' ? 0 : -1;
+        if (scroll.id !== 'dashboard-attention-scroll') return;
+        const more = document.getElementById('dashboard-attention-more');
+        if (!more) return;
+        more.classList.toggle('is-off', !overflows);
+        more.textContent = overflows ? `${uiCountLabel(status.total, 'item', 'items')}. Scroll the list for the rest` : ' ';
+    });
+    updateAttentionBell(status);
+}
+if (typeof document !== 'undefined' && document.addEventListener) {
+    document.addEventListener('scroll', event => {
+        if (event.target instanceof Element && event.target.classList.contains('ui-attn-scroll')) updateAttentionState();
+    }, true);
+    window.addEventListener('resize', () => updateAttentionState());
+}
+
+function updateAttentionBell(status = attentionStatus()) {
+    const label = status.total ? `Needs attention, ${uiCountLabel(status.total, 'item', 'items')}`
+        : status.failed ? 'Needs attention, some checks could not run' : 'Needs attention';
+    document.querySelectorAll('.ui-bell').forEach(bell => {
+        bell.setAttribute('aria-label', label);
+        const badge = bell.querySelector('.ui-bell-n');
+        if (!badge) return;
+        badge.textContent = status.total ? (status.total > 99 ? '99+' : String(status.total)) : '';
+        badge.className = `ui-bell-n is-${status.total ? status.tone : status.failed ? 'unknown' : 'none'}`;
+    });
+}
+
+function uiReplaceKeepingFocus(container, html) {
+    if (container.dataset.shown === html) return false;
+    const active = document.activeElement;
+    let keep = null;
+    if (active && container.contains(active)) {
+        const item = active.closest('[data-key]');
+        const items = [...container.querySelectorAll('[data-key]')];
+        keep = { key: item && item.dataset.key, action: active.textContent.trim(), at: Math.max(0, items.indexOf(item)) };
+    }
+    const scroller = container.closest('.ui-attn-scroll, [data-keep-scroll]');
+    const top = scroller ? scroller.scrollTop : 0;
+    container.innerHTML = html;
+    container.dataset.shown = html;
+    if (scroller) scroller.scrollTop = top;
+    if (keep) {
+        const items = [...container.querySelectorAll('[data-key]')];
+        const same = keep.key ? items.find(i => i.dataset.key === keep.key) : null;
+        const item = same || items[Math.min(keep.at, items.length - 1)];
+        const buttons = item ? [...item.querySelectorAll('button')] : [];
+        const target = (same && buttons.find(b => b.textContent.trim() === keep.action)) || buttons[0] || scroller || null;
+        if (target) target.focus({ preventScroll: true });
+    }
+    return true;
+}
+
+function attentionDmarcLine(insight, domains) {
+    const types = (insight.recommendations || []).map(r => r.type);
+    const sources = (insight.new_sources || []).length;
+    const rate = insight.pass_rate === null || insight.pass_rate === undefined || insight.pass_rate === '' ? NaN : Number(insight.pass_rate);
+    const fallback = 'Review mail identity checks and protection settings.';
+    let line;
+    if (types.includes('low_pass_rate')) {
+        if (!(Number.isFinite(rate) && rate >= 0 && rate <= 100)) return fallback;
+        line = `Only ${Math.round(rate)}% passed mail identity checks.`;
+    } else if (sources) {
+        line = sources === 1 ? 'Mail from a new source failed identity checks.' : 'Mail from new sources failed identity checks.';
+    } else if (types.includes('tighten_policy')) {
+        line = 'Reports suggest stronger protection is safe.';
+    } else {
+        return fallback;
+    }
+    if (domains <= 1) return line;
+    const named = `${insight.domain}: ${line}`;
+    return named.length <= 60 ? named : fallback;
+}
+
+function attentionCheckItems(key, data) {
+    const found = serverCheckFound(key, data);
+    if (!found || !found.length) return [];
+    if (key === 'connection') {
+        const item = { tone: 'fail', title: 'mailcow is not reachable', detail: 'Logs and server data may be out of date.' };
+        return [userIsAdmin() ? { ...item, action: 'Open settings', onclick: "navigateTo('settings')", go: ['settings'] }
+            : { ...item, action: 'Open status', onclick: "navigateTo('status')", go: ['status'] }];
+    }
+    if (key === 'blocklist') {
+        const listedHosts = (data.hosts || []).filter(h => h.status === 'listed');
+        const first = listedHosts[0];
+        const title = listedHosts.length > 1
+            ? `${listedHosts.length} of your addresses are on a blocklist`
+            : `${first ? first.hostname : (data.server_ip || 'Your server')} is on a blocklist`;
+        const whole = v => (v === null || v === undefined || v === '' ? NaN : Number(v));
+        const listed = whole(first ? first.listed_count : data.listed_count);
+        const checked = whole(first && first.total_blacklists ? first.total_blacklists : data.total_blacklists);
+        const counted = listedHosts.length <= 1 && Number.isInteger(listed) && listed >= 0 && Number.isInteger(checked) && checked > 0 && checked >= listed;
+        const detail = counted ? `On ${listed} of ${checked} ${checked === 1 ? 'list' : 'lists'}; some mail may bounce.` : 'Mail to some providers may bounce.';
+        return [{ tone: 'fail', title, detail, action: 'Check listing', onclick: "navigateTo('status')", go: ['status'] }];
+    }
+    if (key === 'containers') {
+        const containers = found[0];
+        return [{ tone: 'fail', title: containers.stopped === 1 ? 'A mailcow container is stopped' : `${containers.stopped} mailcow containers are stopped`,
+            detail: `${containers.running || 0} of ${containers.total || 0} containers are running.`, action: 'Open status', onclick: "navigateTo('status')", go: ['status'] }];
+    }
+    if (key === 'fail2ban') {
+        const legacy = data.legacy_entries || [];
+        if (!legacy.length) return [];
+        const first = legacy[0];
+        return [{ tone: 'warn',
+            title: legacy.length === 1 ? `A Fail2ban entry ${first.list === 'whitelist' ? 'exempts' : 'blocks'} the whole ${first.network} network` : `${legacy.length} Fail2ban entries cover whole /32 networks`,
+            detail: legacy.length === 1 ? 'Repair this entry in Security > Lists.' : 'Repair these entries in Security > Lists.',
+            action: 'Open lists', onclick: "navigateTo('netfilter', { sub: 'lists' })", go: ['netfilter', { sub: 'lists' }] }];
+    }
+    if (key === 'dmarc') {
+        const dmarc = found;
+        return [{ tone: 'warn', title: dmarc.length === 1 ? `DMARC needs attention for ${dmarc[0].domain}` : `DMARC needs attention for ${dmarc.length} domains`,
+            detail: attentionDmarcLine(dmarc[0], dmarc.length), action: 'Open DMARC', onclick: "navigateTo('dmarc')", go: ['dmarc'] }];
+    }
+    if (key === 'appVersion') {
+        if (!data.update_available) return [];
+        appUpdateInfo = data;
+        return [{ tone: 'info', title: `Version ${data.latest_version} is available`,
+            detail: `You are running ${data.current_version}. See what changed before updating.`, action: 'Read changes', onclick: 'showAppUpdateModal()', popup: true }];
+    }
+    if (key === 'mailcowVersion') {
+        if (!data.update_available) return [];
+        window.mailcowUpdateVersion = data.latest_version;
+        window.mailcowUpdateName = data.name || '';
+        window.mailcowUpdateChangelog = data.changelog || 'No changelog available';
+        return [{ tone: 'info', title: `mailcow ${data.latest_version} is available`,
+            detail: `You are running ${data.current_version}.`, action: 'Read changes', onclick: 'showMailcowUpdateModal()', popup: true }];
+    }
+    return [];
+}
+
+function loadDashboardAttention({ force = true } = {}) {
+    const s = attention.checks;
+    return attentionLoad(s, force, async () => {
+        const off = (feature, area) => (window.disabledFeatures || []).includes(feature) || !userCan(area);
+        const get = attentionRead;
+        const [blocklist, containers, dmarc, appVersion, mailcowVersion, connection, fail2ban] = await Promise.all([
+            off('blacklist', 'status') ? null : get('/api/blacklist/summary'),
+            off('', 'status') ? null : get('/api/status/summary'),
+            off('dmarc', 'dmarc') ? null : get('/api/dmarc/insights'),
+            off('', 'status') ? null : get('/api/status/app-version'),
+            off('', 'status') ? null : get('/api/status/version'),
+            off('', 'status') ? null : get('/api/status/mailcow-connection'),
+            off('netfilter', 'security') ? null : get('/api/fail2ban'),
+        ]);
+        const read = { connection, blocklist, containers, fail2ban, dmarc, appVersion, mailcowVersion };
+        return () => {
+            for (const key of ATTENTION_CHECKS) {
+                if (!serverCheckFound(key, read[key])) { s.ok[key] = false; continue; }
+                s.ok[key] = true;
+                s.items[key] = attentionCheckItems(key, read[key]);
+            }
+            const failed = ATTENTION_CHECKS.some(k => s.ok[k] === false);
+            s.at = failed ? Date.now() - ATTENTION_CHECKS_EVERY + 60000 : Date.now();
+            renderAttention();
+        };
+    });
+}
+
+function attentionCheckRows(where) {
+    return ATTENTION_CHECKS.flatMap(k => attention.checks.items[k] || []).map(item => {
+        const act = where !== 'bell' ? item.onclick
+            : item.go ? `attnBellGo(${escapeHtml(JSON.stringify(item.go))})` : `attnBellOpen(); ${item.onclick}`;
+        return `
+        <div class="ui-alert ui-alert-${item.tone}${item.popup ? ' ui-alert-go' : ''}" data-key="check-${escapeHtml(item.title)}"${item.popup ? ` onclick="if (uiAlertRowClick(event)) { ${act} }"` : ''}>
+            <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(item.title)}</b></div><p>${escapeHtml(item.detail)}</p></div>
+            ${where === 'bell' ? '' : `<button type="button" class="ui-btn ui-btn-sm" onclick="${act}">${escapeHtml(item.action)}</button>`}
+        </div>`;
+    }).join('');
+}
+
+function renderAttention() {
+    for (const [where, checksId, alertsId] of [['dashboard', 'dashboard-attention', 'dashboard-security-alerts'], ['bell', 'attn-win-checks', 'attn-win-alerts']]) {
+        const checks = document.getElementById(checksId);
+        if (checks) uiReplaceKeepingFocus(checks, attentionCheckRows(where));
+        const alerts = document.getElementById(alertsId);
+        if (alerts) {
+            uiReplaceKeepingFocus(alerts, attentionAlertRows(where));
+            alerts.classList.toggle('hidden', !attention.alerts.list.length);
+        }
+    }
+    updateAttentionState();
+}
+
+function attentionRefresh({ force = false } = {}) {
+    if (!attention.ready) return;
+    if (!force && document.hidden) return;
+    const now = Date.now();
+    if (force || now - attention.alerts.at >= ATTENTION_ALERTS_EVERY - 2000) loadDashboardSecurityAlerts({ force });
+    if (force || now - attention.checks.at >= ATTENTION_CHECKS_EVERY - 2000) loadDashboardAttention({ force });
+}
+
+function startAttention() {
+    if (attention.ready) return;
+    attention.ready = true;
+    attentionRefresh();
+    setInterval(attentionRefresh, ATTENTION_ALERTS_EVERY);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) attentionRefresh(); });
+    window.matchMedia('(max-width: 760px)').addEventListener('change', event => {
+        if (attnWindow && attnWindow.phone !== event.matches) attnWindowClose();
+    });
+}
+
+let attnWindow = null;
+function attnWindowOpen(bell) {
+    if (attnWindow && attnWindow.el.isConnected) { attnWindowClose(); return; }
+    attnWindow = null;
+    const phone = window.matchMedia('(max-width: 760px)').matches;
+    const head = `<h2 id="attn-win-title" class="ui-attn-win-title">Needs attention <span id="attn-win-count" class="ui-count"></span></h2>
+        <button type="button" id="attn-win-dismiss-all" class="ui-btn ui-btn-sm is-off" onclick="acknowledgeAllSecurityAlertsOnce(this)" data-acts="alerts"></button>`;
+    const list = `<div id="attn-win-checks"></div><div id="attn-win-alerts" class="hidden"></div><p id="attn-win-state" class="ui-dash-clear hidden"></p>`;
+    const foot = `<div class="ui-attn-win-foot"><button type="button" class="ui-link-row ui-attn-win-go" onclick="attnBellGo(['dashboard'])">Open the Dashboard</button></div>`;
+    uiLayerOpener(bell);
+    let el;
+    if (phone) {
+        el = uiSheetShow('attn-sheet', { label: 'Needs attention', head, body: list + foot, onClose: () => attnWindowClose() });
+        const body = el.querySelector('.ui-sheet-body');
+        body.dataset.keepScroll = '';
+        body.tabIndex = -1;
+    } else {
+        el = document.createElement('div');
+        el.id = 'attn-window';
+        el.className = 'ui-dialog-backdrop ui-attn-backdrop';
+        el.innerHTML = `<section class="ui-attn-win" role="dialog" aria-labelledby="attn-win-title">
+            <div class="ui-attn-win-head">${head}<button type="button" class="ui-icon-btn ui-attn-win-x" onclick="attnWindowClose()" aria-label="Close" title="Close">${UI_CLOSE_ICON}</button></div>
+            <div id="attn-win-scroll" class="ui-attn-scroll ui-attn-win-list" data-keep-scroll tabindex="0">${list}</div>${foot}</section>`;
+        el.addEventListener('click', event => { if (uiBackdropClick(event)) attnWindowClose(); });
+        document.body.appendChild(el);
+        const at = bell.getBoundingClientRect();
+        const panel = el.firstElementChild;
+        panel.style.top = `${Math.round(at.bottom + 8)}px`;
+        panel.style.right = `${Math.max(16, Math.round(document.documentElement.clientWidth - at.right))}px`;
+    }
+    attnWindow = { bell, el, phone };
+    document.querySelectorAll('.ui-bell').forEach(b => {
+        b.setAttribute('aria-expanded', String(b === bell));
+        if (b === bell) b.setAttribute('aria-controls', el.id);
+    });
+    renderAttention();
+    attentionRefresh();
+}
+
+function attnWindowClose({ toPage = false } = {}) {
+    const w = attnWindow;
+    if (!w) return;
+    attnWindow = null;
+    if (toPage) uiLayerReturn(w.el, null);
+    if (w.phone) uiSheetClose('attn-sheet');
+    else w.el.remove();
+    document.querySelectorAll('.ui-bell').forEach(b => {
+        b.setAttribute('aria-expanded', 'false');
+        b.removeAttribute('aria-controls');
+    });
+}
+
+async function attnBellGo(go) {
+    const moved = await navigateTo(go[0], go[1] || {});
+    if (moved && attnWindow) attnWindowClose({ toPage: true });
+}
+
+function attnBellOpen() {
+    const w = attnWindow;
+    if (!w) return;
+    attnWindowClose();
+    uiLayerOpener(w.bell);
+}
+
+const DASH_PERIODS = {
+    '24h': { name: '24 hours', last: 'last 24 hours', all: 'All 24 hours' },
+    '7d': { name: '7 days', last: 'last 7 days', all: 'All 7 days' },
+    '30d': { name: '30 days', last: 'last 30 days', all: 'All 30 days' },
+};
+const dashFlow = {
+    period: '24h',
+    data: null,
+    full: null,
+    prev: null,
+    limits: null,
+    zoom: null,
+    pick: null,
+    view: 0,
+    periodGen: 0, periodControl: null, zoomGen: 0, zoomControl: null,
+    loadedAt: 0, zoomer: null, overview: null, previewing: false,
+    stale: false,
+    dataView: -1,
+    failed: false,
+};
+
+function mailFlowHour(t) {
+    return formatClock(t);
+}
+
+function mailFlowSpan(from, to, day = formatDay) {
+    const end = to - 1;
+    const sameDay = zonedDateString(from) === zonedDateString(end);
+    if (isZonedMidnight(from) && isZonedMidnight(to)) return sameDay ? day(from) : `${day(from)} to ${day(end)}`;
+    if (sameDay) return `${day(from)}, ${mailFlowHour(from)} to ${mailFlowHour(to)}`;
+    return `${day(from)}, ${mailFlowHour(from)} to ${day(end)}, ${mailFlowHour(to)}`;
+}
+
+function mailFlowBucketFor(len) {
+    return len <= 48 * 3600000 ? 'hour' : len <= 10 * 86400000 ? '6h' : 'day';
+}
+
+function setDashFlowPeriod(period) {
+    if (!DASH_PERIODS[period]) return;
+    dashFlow.period = period;
+    dashFlow.zoom = null;
+    dashFlow.pick = null;
+    dashFlow.full = null;
+    dashFlow.data = null;
+    mailFlowFiguresUnknown();
+    dashFlow.view++;
+    document.querySelectorAll('#dashboard-flow-period button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.period === period)));
+    loadMailFlowChart();
+}
+
+function pickMailFlowHour(t) {
+    dashFlow.pick = t === null || dashFlow.pick === t ? null : t;
+    renderMailFlowStats();
+}
+
+function dashFlowStep(step) {
+    const l = dashFlow.limits, d = dashFlow.data;
+    if (!l || !d) return;
+    if (step === 'reset') { dashFlowZoom(null); return; }
+    const bars = d.buckets.map(b => ({ s: Date.parse(b.start), e: Date.parse(b.end) }));
+    const n = bars.length;
+    if (!n) return;
+    const shown = { from: bars[0].s, to: bars[n - 1].e };
+    const len = shown.to - shown.from;
+    const k = Math.max(1, Math.floor(n / 2));
+    if (step === 'in') {
+        if (n < 2) return;
+        const i = Math.floor((n - k) / 2);
+        dashFlowZoom({ from: bars[i].s, to: bars[i + k - 1].e });
+    } else if (step === 'earlier') {
+        const from = Math.max(l.from, shown.from - (k < n ? bars[k].s - bars[0].s : len));
+        dashFlowZoom({ from, to: from + len });
+    } else if (step === 'later') {
+        const to = Math.min(l.to, shown.to + (k < n ? bars[n - 1].e - bars[n - 1 - k].e : len));
+        dashFlowZoom({ from: to - len, to });
+    } else {
+        dashFlowZoom(uiTimeZoomStep(shown, l, step));
+    }
+}
+
+function dashFlowZoom(span) {
+    const l = dashFlow.limits;
+    dashFlow.zoom = !span || (l && span.from <= l.from + 1 && span.to >= l.to - 1) ? null : { from: span.from, to: span.to };
+    dashFlow.pick = null;
+    dashFlow.view++;
+    dashFlow.stale = false;
+    if (!dashFlow.zoom && dashFlow.full) {
+        dashFlow.zoomGen++;
+        if (dashFlow.zoomControl) dashFlow.zoomControl.abort();
+        dashFlow.data = dashFlow.full;
+        dashFlow.failed = false;
+        renderMailFlowChart();
+        return;
+    }
+    loadMailFlowChart();
+}
+
+function mailFlowBusy() {
+    return dashFlow.previewing || !!(dashFlow.overview && dashFlow.overview.busy());
+}
+
+function mailFlowSettle() {
+    if (dashFlow.stale && !mailFlowBusy()) loadMailFlowChart();
+}
+
+function mailFlowGet(query, control) {
+    return authenticatedFetch(`/api/stats/flow?${query}`, control ? { signal: control.signal } : {}).then(async res => {
+        if (!res.ok) throw await responseError(res);
+        return res.json();
+    });
+}
+
+function mailFlowFailed() {
+    const chart = document.getElementById('dashboard-flow-chart');
+    if (!chart) return;
+    dashFlow.failed = true;
+    const failed = '<p class="ui-empty ui-text-fail ui-flow-failed">Could not load the mail flow. It tries again on the next refresh.</p>';
+    if (dashFlow.zoomer) { dashFlow.zoomer.destroy(); dashFlow.zoomer = null; }
+    dashFlow.previewing = false;
+    const view = chart.querySelector('.ui-flow-view');
+    if (view) view.innerHTML = failed;
+    else chart.innerHTML = mailFlowFrame(failed);
+    if (!dashFlow.data) mailFlowFiguresUnknown();
+}
+
+function mailFlowFiguresUnknown() {
+    for (const id of ['stat-messages-24h', 'stat-blocked-24h', 'stat-deferred-24h', 'stat-auth-failures-24h']) {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '-';
+    }
+    for (const id of ['stat-messages-note', 'stat-blocked-note', 'stat-deferred-note', 'stat-auth-failures-note']) {
+        const el = document.getElementById(id);
+        if (el) { el.textContent = ''; el.title = ''; }
+    }
+    const figure = document.getElementById('dashboard-flow-messages');
+    if (figure) figure.disabled = true;
+    const long = document.querySelector('#dashboard-flow-title .ui-flow-long');
+    if (long) long.textContent = `Mail flow, ${DASH_PERIODS[dashFlow.period].last}`;
+}
+
+function loadMailFlowChart() {
+    const chart = document.getElementById('dashboard-flow-chart');
+    if (!chart) return;
+    if (mailFlowBusy()) return;
+    dashFlow.stale = false;
+    if (!chart.querySelector('.ui-flow-view')) chart.innerHTML = mailFlowFrame('<p class="ui-empty ui-flow-failed" role="status">Loading...</p>');
+    if (dashFlow.zoom && dashFlow.full) loadMailFlowZoom();
+    else loadMailFlowPeriod();
+}
+
+async function loadMailFlowPeriod() {
+    const gen = ++dashFlow.periodGen;
+    if (dashFlow.periodControl) dashFlow.periodControl.abort();
+    const control = typeof AbortController === 'function' ? new AbortController() : null;
+    dashFlow.periodControl = control;
+    const period = dashFlow.period;
+    try {
+        const [data, prev] = await Promise.all([mailFlowGet(`period=${period}`, control), mailFlowGet(`period=${period}&previous=true`, control)]);
+        if (gen !== dashFlow.periodGen || period !== dashFlow.period) return;
+        dashFlow.full = data;
+        dashFlow.prev = prev;
+        dashFlow.loadedAt = Date.now();
+        dashFlow.limits = { from: Date.parse(data.from), to: Date.parse(data.to), min: 3600000 };
+        if (!dashFlow.zoom) {
+            if (mailFlowBusy()) { dashFlow.stale = true; return; }
+            dashFlow.data = data;
+            dashFlow.failed = false;
+            renderMailFlowChart();
             return;
         }
-
-        const rows = alerts.map(a => {
-            const sev = a.severity === 'critical'
-                ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300'
-                : 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300';
-            return `
-                <div class="flex items-start justify-between gap-3 py-2 border-t border-red-200 dark:border-red-800/50 first:border-t-0">
-                    <div class="min-w-0">
-                        <div class="flex items-center gap-2 flex-wrap">
-                            <span class="inline-block px-2 py-0.5 text-xs font-semibold rounded ${sev}">${escapeHtml((a.severity || 'warning').toUpperCase())}</span>
-                            <span class="text-sm font-semibold text-gray-900 dark:text-white">${escapeHtml(a.title)}</span>
-                        </div>
-                        <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">${escapeHtml(a.detail || '')}</p>
-                        <p class="text-xs text-gray-400 mt-1">${escapeHtml(formatTime(a.created_at))}</p>
-                    </div>
-                    <button type="button" onclick="acknowledgeSecurityAlert(${a.id})" class="flex-shrink-0 px-2 py-1 text-xs rounded bg-white/70 dark:bg-gray-800 border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" title="Dismiss">Dismiss</button>
-                </div>`;
-        }).join('');
-
-        container.innerHTML = `
-            <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
-                <div class="flex items-center justify-between mb-2">
-                    <div class="flex items-center gap-2">
-                        <svg class="w-5 h-5 text-red-600 dark:text-red-400" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd"></path></svg>
-                        <h3 class="text-sm font-semibold text-red-800 dark:text-red-300">Security Alerts (${alerts.length})</h3>
-                    </div>
-                    <button type="button" onclick="acknowledgeAllSecurityAlerts()" class="px-2 py-1 text-xs rounded bg-white/70 dark:bg-gray-800 border border-red-300 dark:border-red-700 text-red-700 dark:text-red-300 hover:bg-red-100 dark:hover:bg-red-900/40">Dismiss all</button>
-                </div>
-                ${rows}
-            </div>`;
-        container.classList.remove('hidden');
-    } catch (e) {
-        console.warn('Failed to load security alerts:', e);
-        container.classList.add('hidden');
+        const l = dashFlow.limits, z = dashFlow.zoom;
+        const from = Math.max(z.from, l.from), to = Math.min(z.to, l.to);
+        const moved = from !== z.from || to !== z.to;
+        if (mailFlowBusy()) {
+            if (moved) { dashFlow.zoom = to - from >= l.min ? { from, to } : null; dashFlow.view++; }
+            dashFlow.stale = true;
+            return;
+        }
+        if (moved) { dashFlowZoom(to - from >= l.min ? { from, to } : null); return; }
+        if (dashFlow.dataView !== dashFlow.view) { loadMailFlowZoom(); return; }
+        renderMailFlowOverview(true);
+    } catch (error) {
+        if (gen !== dashFlow.periodGen || (error && error.name === 'AbortError')) return;
+        if (mailFlowBusy()) { dashFlow.failed = true; dashFlow.stale = true; return; }
+        if (!dashFlow.zoom) mailFlowFailed();
     }
 }
 
+async function loadMailFlowZoom() {
+    const z = dashFlow.zoom, view = dashFlow.view;
+    const gen = ++dashFlow.zoomGen;
+    if (dashFlow.zoomControl) dashFlow.zoomControl.abort();
+    const control = typeof AbortController === 'function' ? new AbortController() : null;
+    dashFlow.zoomControl = control;
+    const iso = t => new Date(t).toISOString();
+    try {
+        const data = await mailFlowGet(`from=${iso(z.from)}&to=${iso(z.to)}&bucket=${mailFlowBucketFor(z.to - z.from)}`, control);
+        if (gen !== dashFlow.zoomGen || view !== dashFlow.view) return;
+        if (mailFlowBusy()) { dashFlow.stale = true; return; }
+        dashFlow.data = data;
+        dashFlow.failed = false;
+        dashFlow.zoom = { from: Date.parse(data.from), to: Date.parse(data.to) };
+        const l = dashFlow.limits;
+        if (l) dashFlow.limits = { ...l, to: Math.max(l.to, dashFlow.zoom.to) };
+        if (l && dashFlow.zoom.from <= l.from + 1 && dashFlow.zoom.to >= l.to - 1) dashFlow.zoom = null;
+        renderMailFlowChart();
+    } catch (error) {
+        if (gen !== dashFlow.zoomGen || view !== dashFlow.view || (error && error.name === 'AbortError')) return;
+        if (mailFlowBusy()) { dashFlow.failed = true; dashFlow.stale = true; return; }
+        mailFlowFailed();
+    }
+}
+
+function refreshMailFlowChart() {
+    if (mailFlowBusy()) return;
+    if (dashFlow.failed) { loadMailFlowChart(); return; }
+    const every = dashFlow.period === '24h' ? 60000 : 300000;
+    if (Date.now() - dashFlow.loadedAt >= every) loadMailFlowPeriod();
+}
+
+function renderMailFlowOverview(alone = false) {
+    const strip = document.querySelector('#dashboard-flow-chart .ui-ov');
+    if (!strip) return;
+    const draw = () => {
+        if (dashFlow.overview) { dashFlow.overview.destroy(); dashFlow.overview = null; }
+        const full = dashFlow.full, l = dashFlow.limits;
+        if (!full || !l) { strip.innerHTML = ''; return; }
+        const bars = full.buckets.map(b => ({ s: Date.parse(b.start), e: Date.parse(b.end), v: b.clean + b.spam }));
+        const max = Math.max(1, ...bars.map(b => b.v));
+        const kept = full.kept_from ? Date.parse(full.kept_from) : null;
+        const i = kept === null ? -1 : bars.findIndex(b => kept < b.e);
+        const gone = kept === null || kept <= l.from ? 0 : i < 0 ? 1 : (i + Math.max(0, kept - bars[i].s) / (bars[i].e - bars[i].s)) / bars.length;
+        strip.innerHTML = `<div class="ui-ov-bars" aria-hidden="true">${bars.map(b => `<i style="height:${Math.max(6, b.v / max * 100)}%"></i>`).join('')}</div>`
+            + (gone ? `<div class="ui-ov-gone" style="width:${gone * 100}%" aria-hidden="true"></div>` : '');
+        const edges = bars.map(b => b.s).concat(l.to);
+        const big = dashFlow.period === '24h' ? 6 * 3600000 : dashFlow.period === '7d' ? 86400000 : 7 * 86400000;
+        dashFlow.overview = uiTimeOverview(strip, {
+            limits: () => dashFlow.limits,
+            span: () => dashFlow.zoom || dashFlow.limits,
+            snap: uiNearestLocalHour,
+            step: (t, dir, isBig) => (isBig ? t + dir * big
+                : dir > 0 ? (edges.find(e => e > t + 1) ?? l.to) : ([...edges].reverse().find(e => e < t - 1) ?? l.from)),
+            label: t => `${formatDay(t)}, ${mailFlowHour(t)}`,
+            change: span => dashFlowZoom(span),
+            idle: mailFlowSettle,
+        });
+    };
+    if (alone) uiRedrawKeepingFocus(strip, draw);
+    else draw();
+}
+
+function mailFlowFoot(can) {
+    const off = on => (on ? '' : ' disabled');
+    const figure = document.getElementById('dashboard-flow-messages');
+    if (figure) figure.disabled = !can.view;
+    return `<div class="ui-flow-foot">
+            <div class="ui-flow-legend"><span><i class="ui-flow-clean"></i>Clean</span><span><i class="ui-flow-spam"></i>Spam</span></div>
+            <div class="ui-flow-zoom" role="group" aria-label="Zoom the chart">
+                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('earlier')" aria-label="Earlier" title="Earlier"${off(can.earlier)}>&lsaquo;</button>
+                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('out')" aria-label="Zoom out" title="Zoom out"${off(can.out)}>&minus;</button>
+                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('in')" aria-label="Zoom in" title="Zoom in (or pinch, drag across bars, Ctrl+wheel)"${off(can.in)}>+</button>
+                <button type="button" class="ui-icon-btn ui-icon-btn-sm" onclick="dashFlowStep('later')" aria-label="Later" title="Later"${off(can.later)}>&rsaquo;</button>
+                <button type="button" class="ui-icon-btn ui-icon-btn-sm${can.zoomed ? '' : ' is-off'}" onclick="dashFlowStep('reset')" aria-label="Reset zoom" title="Reset zoom"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/></svg></button>
+            </div>
+            <span class="ui-flow-actions">
+                <button type="button" id="dashboard-flow-view" class="ui-btn ui-btn-sm" onclick="openMailFlowHourMessages()"${off(can.view)}>View these messages</button>
+                <button type="button" id="dashboard-flow-reset" class="ui-more is-off" onclick="pickMailFlowHour(null)">Clear</button>
+            </span>
+        </div>`;
+}
+
+function mailFlowFrame(inner) {
+    return `<div class="ui-flow-view">${inner}</div><div class="ui-flow-axis" aria-hidden="true"></div><div class="ui-ov" data-zoom></div>${mailFlowFoot({})}`;
+}
+
+function renderMailFlowChart() {
+    const chart = document.getElementById('dashboard-flow-chart');
+    const d = dashFlow.data;
+    if (!chart || !d) return;
+    const bars = d.buckets.map(b => ({ ...b, s: Date.parse(b.start), e: Date.parse(b.end) }));
+    const max = Math.max(1, ...bars.map(b => b.clean + b.spam));
+    const n = bars.length;
+    const label = (b, i) => {
+        const p = zonedParts(b.s);
+        if (i === n - 1 && b.partial) return '<span class="is-major">Now</span>';
+        if (d.bucket === 'hour') return p.hour % 6 === 0 ? `<span class="is-major">${formatClock(b.s, { compact: true })}</span>` : p.hour % 3 === 0 ? `<span class="is-minor">${formatClock(b.s, { compact: true })}</span>` : '<span></span>';
+        if (d.bucket === '6h') return p.hour < 6 ? `<span class="is-major">${escapeHtml(formatDayMonth(b.s))}</span>` : '<span></span>';
+        return (n <= 10 || (i % 5 === 0 && i < n - 5)) ? `<span class="is-major">${escapeHtml(formatDayMonth(b.s))}</span>` : '<span></span>';
+    };
+    const zoomed = !!dashFlow.zoom;
+    dashFlow.dataView = dashFlow.view;
+    const shown = { from: Date.parse(d.from), to: Date.parse(d.to) };
+    const kept = d.kept_from ? Date.parse(d.kept_from) : null;
+    let gone = 0;
+    if (kept !== null && kept > shown.from) {
+        const i = bars.findIndex(b => kept < b.e);
+        gone = i < 0 ? 1 : (i + Math.max(0, kept - bars[i].s) / (bars[i].e - bars[i].s)) / n;
+    }
+    if (dashFlow.zoomer) { dashFlow.zoomer.destroy(); dashFlow.zoomer = null; }
+    uiRedrawKeepingFocus(chart, () => { chart.innerHTML = `
+        <div class="ui-flow-view">
+            <div class="ui-flow-bars" role="group" aria-label="Messages per ${d.bucket === 'day' ? 'day' : d.bucket === '6h' ? 'six hours' : 'hour'}" data-zoom>${bars.map(b => `
+                <button type="button" class="ui-flow-bar${b.partial ? ' is-partial' : ''}" data-t="${b.s}" data-start="${b.s}" data-end="${b.e}" aria-pressed="false" onclick="pickMailFlowHour(${b.s})"
+                    title="${escapeHtml(mailFlowSpan(b.s, b.e))}: ${Number(b.messages).toLocaleString()} messages, ${Number(b.clean).toLocaleString()} clean, ${Number(b.spam).toLocaleString()} spam${b.partial ? ', so far' : ''}. Click for its numbers">
+                    <i class="ui-flow-spam" style="height: ${(b.spam / max) * 100}%"></i>
+                    <i class="ui-flow-clean" style="height: ${(b.clean / max) * 100}%"></i>
+                </button>`).join('')}</div>
+            ${gone ? `<div class="ui-flow-gone" style="width:${gone * 100}%" title="Logs older than the retention days are cleaned up">${gone > .2 ? '<span>Logs cleaned up</span>' : ''}</div>` : ''}
+            <div class="ui-flow-band hidden" aria-hidden="true"></div>
+        </div>
+        <div class="ui-flow-axis" aria-hidden="true">${bars.map(label).join('')}</div>
+        <div class="ui-ov" data-zoom role="group" aria-label="The whole period, with the span shown"></div>
+        ${mailFlowFoot({ zoomed, earlier: zoomed && shown.from > dashFlow.limits.from, out: zoomed, in: shown.to - shown.from > dashFlow.limits.min, later: zoomed && shown.to < dashFlow.limits.to, view: true })}`;
+        renderMailFlowOverview(); });
+    const box = chart.querySelector('.ui-flow-bars');
+    const view = chart.querySelector('.ui-flow-view');
+    const band = chart.querySelector('.ui-flow-band');
+    dashFlow.zoomer = uiTimeZoom(box, {
+        bars: () => [...box.querySelectorAll('.ui-flow-bar')],
+        span: () => dashFlow.zoom || dashFlow.limits,
+        limits: () => dashFlow.limits,
+        preview: (span, kind) => {
+            if (!dashFlow.previewing) {
+                dashFlow.previewing = true;
+                if (dashFlow.zoomControl) dashFlow.zoomControl.abort();
+                dashFlow.zoomGen++;
+            }
+            if (kind === 'select') {
+                const r = view.getBoundingClientRect();
+                band.classList.remove('hidden');
+                band.style.left = `${span.x1 - r.left}px`;
+                band.style.width = `${span.x2 - span.x1}px`;
+                return;
+            }
+            const len = shown.to - shown.from, next = span.to - span.from;
+            const k = len / next;
+            const x = -(span.from - shown.from) / len * view.clientWidth * k;
+            box.style.transformOrigin = '0 0';
+            box.style.transform = `translateX(${x}px) scaleX(${k})`;
+        },
+        change: span => { dashFlow.previewing = false; dashFlowZoom({ from: span.from, to: span.to }); },
+        cancel: () => {
+            dashFlow.previewing = false;
+            box.style.transform = '';
+            band.classList.add('hidden');
+            loadMailFlowChart();
+        },
+    });
+    renderMailFlowStats();
+}
+
+function renderMailFlowStats() {
+    const d = dashFlow.data;
+    if (!d) return;
+    const period = DASH_PERIODS[dashFlow.period];
+    const bar = dashFlow.pick === null ? null : d.buckets.find(b => Date.parse(b.start) === dashFlow.pick);
+    if (!bar) dashFlow.pick = null;
+    const set = (id, text) => { const el = document.getElementById(id); if (el) { el.textContent = text; if (el.tagName === 'SMALL') el.title = text; } };
+    const n = v => (v || 0).toLocaleString();
+    const src = bar || d.totals;
+    set('stat-messages-24h', n(src.messages));
+    set('stat-blocked-24h', n(src.blocked));
+    set('stat-deferred-24h', n(src.deferred));
+    set('stat-auth-failures-24h', n(src.auth_failures));
+    const p = dashFlow.prev && dashFlow.prev.totals;
+    const before = key => {
+        if (bar) return `${dashFlow.zoom ? 'Shown' : period.name}: ${n(d.totals[key])}`;
+        if (dashFlow.zoom || !p) return '';
+        return `Previous: ${n(p[key])}${dashFlow.prev.older_may_be_gone ? ' (partial)' : ''}`;
+    };
+    const note = document.getElementById('stat-messages-note');
+    if (note) {
+        const lines = [`${n(src.deliveries)} deliveries`, before('messages')];
+        note.innerHTML = lines.map(line => `<span>${escapeHtml(line) || '&nbsp;'}</span>`).join('');
+        note.title = lines.filter(Boolean).join(', ');
+    }
+    set('stat-blocked-note', before('blocked'));
+    set('stat-deferred-note', before('deferred'));
+    set('stat-auth-failures-note', before('auth_failures'));
+    const shown = bar ? [Date.parse(bar.start), Date.parse(bar.end)] : dashFlow.zoom ? [Date.parse(d.from), Date.parse(d.to)] : null;
+    const soFar = bar && bar.partial ? ', so far' : '';
+    const long = document.querySelector('#dashboard-flow-title .ui-flow-long');
+    const short = document.querySelector('#dashboard-flow-title .ui-flow-short');
+    if (long) long.textContent = `Mail flow, ${shown ? mailFlowSpan(...shown) : period.last}${soFar}`;
+    if (short) short.textContent = shown ? `${mailFlowSpan(...shown, formatDayMonth)}${soFar}` : 'Mail flow';
+    document.getElementById('dashboard-flow-reset')?.classList.toggle('is-off', !bar);
+    document.getElementById('dashboard-flow-clear')?.classList.toggle('hidden', !bar);
+    const bars = document.querySelector('#dashboard-flow-chart .ui-flow-bars');
+    if (bars) {
+        bars.classList.toggle('has-pick', !!bar);
+        bars.querySelectorAll('.ui-flow-bar').forEach(b => b.setAttribute('aria-pressed', String(!!bar && Number(b.dataset.t) === dashFlow.pick)));
+    }
+}
+
+function messagesShowRange(start, endInclusive, label = '') {
+    document.getElementById('messages-date-range').value = 'custom';
+    document.getElementById('messages-start-date').value = start;
+    document.getElementById('messages-end-date').value = endInclusive;
+    document.getElementById('messages-date-range-start').value = zonedDateString(Date.parse(start));
+    document.getElementById('messages-date-range-end').value = zonedDateString(Date.parse(endInclusive));
+    document.getElementById('messages-date-range-label').textContent = label || mailFlowSpan(Date.parse(start), Date.parse(endInclusive) + 1);
+    setMessagesDatePresetActive(null);
+}
+
+function openMessagesRange({ start, endInclusive, user = '', label = '' }) {
+    return openMessagesWith(() => {
+        ['search', 'sender', 'recipient', 'user', 'ip', 'direction', 'status'].forEach(key => {
+            const el = document.getElementById(`messages-filter-${key}`);
+            if (el) el.value = '';
+        });
+        if (user) {
+            const field = document.getElementById('messages-filter-user');
+            if (field) field.value = user;
+        }
+        messagesShowRange(start, endInclusive, label);
+        setMessagesFilters({ start_date: start, end_date: endInclusive, ...(user ? { user } : {}) });
+        currentPage.messages = 1;
+    });
+}
+
+function openMailFlowHourMessages() {
+    const d = dashFlow.data;
+    if (!d) return;
+    const bar = dashFlow.pick === null ? null : d.buckets.find(b => Date.parse(b.start) === dashFlow.pick);
+    if (bar) openMessagesRange({ start: bar.start, endInclusive: bar.end_inclusive });
+    else openMessagesRange({ start: d.from, endInclusive: d.to_inclusive });
+}
+
+function acknowledgeSecurityAlertOnce(alertId, button) {
+    return uiOnce(`alert-ack:${alertId}`, () => acknowledgeSecurityAlert(alertId), button);
+}
 async function acknowledgeSecurityAlert(alertId) {
+    if (!uiMayAct('alerts')) return;
+    const alert =dashboardAlerts.get(Number(alertId)) || (typeof alertActivity !== 'undefined' && alertActivity && Number(alertActivity.alert.id) === Number(alertId) ? alertActivity.alert : null);
+    const area = alert ? alertArea(alert) : null;
+    if (area && !uiMayAct(area)) return;
+    const name = !alert ? 'the alert' : alert.subject && !String(alert.title).includes(alert.subject) ? `${alert.title}: ${alert.subject}` : alert.title;
     try {
-        await authenticatedFetch(`/api/security-alerts/${alertId}/acknowledge`, { method: 'POST' });
+        const res = await authenticatedFetch(`/api/security-alerts/${alertId}/acknowledge`, { method: 'POST' });
+        if (!res.ok) throw await responseError(res);
+        const done = await res.json();
         loadDashboardSecurityAlerts();
+        if (!done.receipt) { showToast('Already dismissed', 'info'); return; }
+        offerAlertUndo(done.receipt, 'Alert dismissed', `Undo dismissing ${name}`, area ? [area] : ALERT_AREAS);
     } catch (e) {
-        showToast('Failed to dismiss alert', 'error');
+        showToast(`Could not dismiss the alert: ${uiSentence(uiErrorText(e))}`, 'error');
     }
 }
 
+function acknowledgeAllSecurityAlertsOnce(button) {
+    return uiOnce('alert-ack-all', acknowledgeAllSecurityAlerts, button, 'Dismissing...');
+}
 async function acknowledgeAllSecurityAlerts() {
+    if (!uiMayAct('alerts')) return;
+    const ids = dashboardWritableAlertIds.slice();
+    if (!ids.length) return;
+    const areas = ALERT_AREAS.filter(a => userCan(a, 'write'));
     try {
-        await authenticatedFetch('/api/security-alerts/acknowledge-all', { method: 'POST' });
+        const res = await authenticatedFetch('/api/security-alerts/acknowledge-all', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids }),
+        });
+        if (!res.ok) throw await responseError(res);
+        const done = await res.json();
         loadDashboardSecurityAlerts();
-        showToast('All security alerts dismissed', 'success');
+        if (!done.receipt) { showToast('Already dismissed', 'info'); return; }
+        const words = `${uiCountLabel(done.acknowledged, 'alert', 'alerts')} dismissed`;
+        offerAlertUndo(done.receipt, words, `Undo dismissing ${uiCountLabel(done.acknowledged, 'alert', 'alerts')}`, areas);
     } catch (e) {
-        showToast('Failed to dismiss alerts', 'error');
+        showToast(`Could not dismiss the alerts: ${uiSentence(uiErrorText(e))}`, 'error');
+    }
+}
+
+function offerAlertUndo(receipt, message, undoName, areas) {
+    showToast(message, 'success', { duration: 10000, action: { label: 'Undo', ariaLabel: undoName, onAction: () => undoAlertDismissal(receipt, undoName, areas) } });
+}
+
+function offerAlertsRefresh(message) {
+    showToast(message, 'warning', { duration: Infinity, action: { label: 'Refresh', ariaLabel: 'Refresh Needs attention', onAction: async () => {
+        if (!(await loadDashboardSecurityAlerts())) offerAlertsRefresh('Needs attention could not be refreshed. Try again.');
+        else showToast('Needs attention is up to date', 'success');
+    } } });
+}
+
+async function undoAlertDismissal(receipt, undoName, areas = ALERT_AREAS) {
+    if (!uiMayAct('alerts')) return;
+    if (!areas.some(a => userCan(a, 'write'))) { uiNotPermitted(); return; }
+    try {
+        const res = await authenticatedFetch(`/api/security-alerts/acknowledgements/${encodeURIComponent(receipt)}/undo`, { method: 'POST' });
+        if (!res.ok) throw await responseError(res);
+        const done = await res.json();
+        const shown = await loadDashboardSecurityAlerts();
+        const back = done.restored ? `${uiCountLabel(done.restored, 'alert', 'alerts')} back` : '';
+        if (!shown) {
+            offerAlertsRefresh(back ? `${back}, but Needs attention could not be refreshed.` : 'Needs attention could not be refreshed.');
+            return;
+        }
+        const place = attnWindow ? ['#attn-win-alerts', attnWindow.phone ? '#attn-sheet .ui-sheet-body' : '#attn-win-scroll']
+            : typeof currentTab === 'undefined' || currentTab === 'dashboard' ? ['#dashboard-security-alerts', '#dashboard-attention-scroll'] : null;
+        if (place) {
+            const row = done.ids && done.ids.map(id => document.querySelector(`${place[0]} [data-key="alert-${Number(id)}"]`)).find(Boolean);
+            const target = row ? row.querySelector('.ui-alert-x') : document.querySelector(place[1]);
+            if (target) target.focus({ preventScroll: false });
+        }
+        showToast(back ? `${back} in Needs attention` : 'Nothing to undo: dismissed again, or your access changed', back ? 'success' : 'info');
+    } catch (e) {
+        showToast(`Could not undo: ${uiSentence(uiErrorText(e))}`, 'error', { duration: Infinity, action: { label: 'Retry', ariaLabel: `Retry: ${undoName}`, onAction: () => undoAlertDismissal(receipt, undoName, areas) } });
+    }
+}
+
+const DASH_TRENDS = {
+    storage_used: { label: 'Mail storage used', format: v => `${Math.round(v)}%` },
+    security_review: { label: 'Addresses to review', format: v => `${Math.round(v)}`, feature: 'netfilter' },
+    security_banned: { label: 'Addresses banned', format: v => `${Math.round(v)}`, feature: 'netfilter' },
+};
+let dashboardTrends = null;
+let dashboardTrendsAt = 0;
+
+async function loadDashboardTrends() {
+    dashboardTrendsAt = Date.now();
+    const names = Object.keys(DASH_TRENDS).filter(n => !DASH_TRENDS[n].feature || !isFeatureDisabled(DASH_TRENDS[n].feature));
+    try {
+        const res = await authenticatedFetch(`/api/stats/trends?names=${names.join(',')}&days=7`);
+        if (!res.ok) return;
+        dashboardTrends = (await res.json()).trends || {};
+        paintDashboardTrends();
+    } catch (e) {
+        console.warn('Failed to load trends:', e);
+    }
+}
+
+function paintDashboardTrends() {
+    document.querySelectorAll('.ui-spark[data-trend]').forEach(el => {
+        const name = el.dataset.trend, meta = DASH_TRENDS[name];
+        if (!meta || !dashboardTrends || !(name in dashboardTrends)) { el.innerHTML = ''; return; }
+        el.innerHTML = uiSparkline(dashboardTrends[name], { days: 7, label: meta.label, format: meta.format });
+    });
+}
+
+function setDashKpi(id, value, tone, note) {
+    const el = document.getElementById(id);
+    if (el) { el.textContent = value; el.className = tone ? `ui-${tone}` : ''; }
+    const noteEl = document.getElementById(`${id}-note`);
+    if (noteEl && note !== undefined) noteEl.textContent = note;
+}
+function dashKpiFailed(...ids) {
+    for (const id of ids) {
+        const el = document.getElementById(id);
+        const noteEl = document.getElementById(`${id}-note`);
+        if (noteEl) noteEl.textContent = !el || el.textContent === '-' ? 'Could not load' : 'Could not update';
+    }
+}
+function dashKpiUnknown(id) {
+    const shown = document.getElementById(id)?.textContent;
+    if (shown && shown !== '-' && shown !== 'Unknown') dashKpiFailed(id);
+    else setDashKpi(id, 'Unknown', '', 'mailcow did not answer');
+}
+
+async function loadDashboardSecurity() {
+    const panel = document.getElementById('dashboard-security-panel');
+    if (!panel) return;
+    if (isFeatureDisabled('netfilter') || !userCan('security')) {
+        panel.classList.add('hidden');
+        return;
+    }
+    panel.classList.remove('hidden');
+    const get = async url => {
+        try {
+            const res = await authenticatedFetch(url);
+            return res.ok ? await res.json() : null;
+        } catch (e) {
+            return null;
+        }
+    };
+    const [page, rules, abuse] = await Promise.all([
+        get('/api/security/addresses?list=review&limit=1'),
+        protectionSaved ? null : get('/api/protection/rules'),
+        smtpAbuseStatus ? null : get('/api/smtp-abuse/status?limit=1'),
+        fail2banSettingsLoaded ? null : loadFail2BanSettings(),
+    ]);
+    if (rules) {
+        protectionCaps = rules.capabilities || protectionCaps;
+        if (!protectionDirty) {
+            protectionRules = rules.rules;
+            protectionSaved = JSON.parse(JSON.stringify(rules.rules));
+        }
+    }
+    if (abuse) smtpAbuseStatus = abuse;
+    renderDashboardSecurity(page || dashboardSecurityPage);
+}
+
+let dashboardSecurityPage = null;
+let dashboardProtectionsOpen = false;
+
+function renderDashboardSecurity(page = dashboardSecurityPage) {
+    dashboardSecurityPage = page;
+    const box = document.getElementById('dashboard-security');
+    if (!box) return;
+    const known = !page || page.fail2ban_known !== false;
+    const counts = page && known ? page.all_counts : null;
+    const n = key => counts ? Number(counts[key]).toLocaleString() : page ? 'Unknown' : '-';
+    const protections = securityProtectionItems();
+    const on = protections.filter(securityProtectionOn);
+    const lineState = on.some(p => p.state === 'on') ? 'on' : on.length ? 'watch' : 'off';
+    box.innerHTML = `
+        <div class="ui-stats ui-dash-sec-stats">
+            <button type="button" class="ui-stat" onclick="openSecurityList('review')"><span>To review</span><b>${n('review')}</b><small>${!page ? 'Could not load' : known ? 'Not banned' : 'Fail2ban did not answer'}</small><span class="ui-spark" data-trend="security_review"></span></button>
+            <button type="button" class="ui-stat" onclick="openSecurityList('banned')"><span>Banned now</span><b${counts && counts.banned ? ' class="ui-text-fail"' : ''}>${n('banned')}</b><small>${!page ? 'Could not load' : known ? 'By Fail2ban and the rules' : 'Fail2ban did not answer'}</small><span class="ui-spark" data-trend="security_banned"></span></button>
+        </div>
+        <button type="button" class="ui-dash-sec-prot is-${lineState}" aria-expanded="${dashboardProtectionsOpen}" aria-controls="dashboard-protections"
+            onclick="dashboardProtectionsOpen = !dashboardProtectionsOpen; renderDashboardSecurity()">
+            <span class="ui-prot-mark" aria-hidden="true">${securityProtectionMark(lineState)}</span><b>Protection ${on.length} of ${protections.length} on</b><span class="ui-dash-sec-chev" aria-hidden="true"></span>
+            ${on.length && !dashboardProtectionsOpen ? `<span class="ui-dash-sec-on">${on.map(p => escapeHtml(p.name)).join(' · ')}</span>` : ''}
+        </button>
+        ${dashboardProtectionsOpen ? `<div id="dashboard-protections" class="ui-dash-sec-list">${protections.map(p => securityProtectionButton(p, 'openSecurityProtection')).join('')}</div>` : ''}`;
+    paintDashboardTrends();
+}
+
+async function loadDashboardHealth() {
+    try {
+        const [infoRes, versionRes] = await Promise.all([authenticatedFetch('/api/settings/info'), authenticatedFetch('/api/status/app-version')]);
+        if (infoRes.ok) {
+            const info = await infoRes.json();
+            const jobs = summarizeJobs(info.background_jobs || {});
+            setDashKpi('dash-kpi-jobs', `${jobs.healthy} of ${jobs.running} healthy`, jobs.failed.length ? 'fail' : '',
+                jobs.failed.length ? `${jobs.failed.map(([name]) => name).join(', ')} failed` : (jobs.off ? `${jobs.off} off with their feature` : 'None failed'));
+            const c = info.correlation_status || {};
+            if (c.known === false || !info.correlation_status) setDashKpi('dash-kpi-linking', 'Unknown', '', 'Could not count');
+            else setDashKpi('dash-kpi-linking', `${c.completion_rate || 0}%`, c.incomplete ? 'warn' : '',
+                `${(c.complete || 0).toLocaleString()} of ${(c.total || 0).toLocaleString()} complete`);
+        }
+        else dashKpiFailed('dash-kpi-jobs', 'dash-kpi-linking');
+        if (versionRes.ok) {
+            const v = await versionRes.json();
+            setDashKpi('dash-kpi-version', v.current_version || '-', '', v.update_available ? `${v.latest_version} available`
+                : v.latest_version === 'unknown' ? 'Update check failed' : 'Up to date');
+        }
+        else dashKpiFailed('dash-kpi-version');
+    } catch (error) {
+        console.error('Failed to load dashboard health:', error);
+        dashKpiFailed('dash-kpi-jobs', 'dash-kpi-linking', 'dash-kpi-version');
     }
 }
 
@@ -1399,152 +3379,90 @@ async function loadDashboardStatusSummary() {
 
         const response = await authenticatedFetch('/api/status/summary');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
         console.log('Status summary data:', data);
 
-        const containersDiv = document.getElementById('dashboard-containers-summary');
         const containers = data.containers || {};
-        containersDiv.innerHTML = `
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Running</span>
-                <span class="text-lg font-semibold text-green-600 dark:text-green-400">${containers.running || 0}</span>
-            </div>
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Stopped</span>
-                <span class="text-lg font-semibold ${containers.stopped > 0 ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-gray-400'}">${containers.stopped || 0}</span>
-            </div>
-            <div class="flex justify-between items-center pt-2 border-t border-gray-200 dark:border-gray-700">
-                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Total</span>
-                <span class="text-lg font-semibold text-gray-900 dark:text-white">${containers.total || 0}</span>
-            </div>
-        `;
+        if (data.containers_known === false) dashKpiUnknown('dash-kpi-containers');
+        else setDashKpi('dash-kpi-containers', `${containers.running || 0} of ${containers.total || 0} running`, containers.stopped > 0 ? 'fail' : '',
+            [containers.stopped ? `${containers.stopped} stopped` : 'All running', containers.ignored ? `${containers.ignored} ignored` : ''].filter(Boolean).join(', '));
 
-        const storageDiv = document.getElementById('dashboard-storage-summary');
         const storage = data.storage || {};
         const usedPercent = parseInt(storage.used_percent) || 0;
-        const storageColor = usedPercent > 90 ? 'text-red-600 dark:text-red-400' :
-            usedPercent > 75 ? 'text-yellow-600 dark:text-yellow-400' :
-                'text-green-600 dark:text-green-400';
-        storageDiv.innerHTML = `
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Used</span>
-                <span class="text-lg font-semibold ${storageColor}">${storage.used_percent || '0%'}</span>
-            </div>
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Available</span>
-                <span class="text-sm text-gray-900 dark:text-white">${storage.used || '0'} / ${storage.total || '0'}</span>
-            </div>
-            <div class="mt-2">
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                    <div class="h-2 rounded-full ${usedPercent > 90 ? 'bg-red-600' : usedPercent > 75 ? 'bg-yellow-600' : 'bg-green-600'}" style="width: ${usedPercent}%"></div>
-                </div>
-            </div>
-        `;
+        const storageLevel = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : '';
+        if (storage.known === false) dashKpiUnknown('dash-kpi-storage');
+        else setDashKpi('dash-kpi-storage', `${storage.used_percent || '0%'} used`, storageLevel, `${storage.used || '0'} of ${storage.total || '0'}`);
 
         const systemDiv = document.getElementById('dashboard-system-summary');
         const system = data.system || {};
+        if (system.known === false) {
+            if (!systemDiv.querySelector('.ui-kv')) systemDiv.innerHTML = '<p class="ui-empty ui-text-fail">Could not load: mailcow did not answer</p>';
+            return;
+        }
         systemDiv.innerHTML = `
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Domains</span>
-                <span class="text-lg font-semibold text-gray-900 dark:text-white">${system.domains || 0}</span>
-            </div>
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Mailboxes</span>
-                <span class="text-lg font-semibold text-gray-900 dark:text-white">${system.mailboxes || 0}</span>
-            </div>
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-400">Aliases</span>
-                <span class="text-lg font-semibold text-gray-900 dark:text-white">${system.aliases || 0}</span>
-            </div>
+            <div class="ui-kv"><span>Domains</span><b>${Number(system.domains || 0).toLocaleString()}</b></div>
+            <div class="ui-kv"><span>Mailboxes</span><b>${Number(system.mailboxes || 0).toLocaleString()}</b></div>
+            <div class="ui-kv"><span>Aliases</span><b>${Number(system.aliases || 0).toLocaleString()}</b></div>
         `;
     } catch (error) {
         console.error('Failed to load status summary:', error);
+        dashKpiFailed('dash-kpi-containers', 'dash-kpi-storage');
+        const systemDiv = document.getElementById('dashboard-system-summary');
+        if (systemDiv && systemDiv.querySelector('.ui-loading')) {
+            systemDiv.innerHTML = `<p class="ui-empty ui-text-fail">Could not load: ${escapeHtml(uiErrorText(error))}</p>`;
+        }
     }
 }
 
-async function loadRecentActivity() {
-    const container = document.getElementById('recent-activity');
+let netfilterExact = null;
 
-    try {
-        console.log('Loading Recent Activity...');
-
-        const response = await authenticatedFetch('/api/stats/recent-activity?limit=11');
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        console.log('Recent Activity data:', data);
-
-        if (data.activity.length === 0) {
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No recent activity</p>';
-            return;
-        }
-
-        container.innerHTML = data.activity.map(msg => `
-            <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 p-3 sm:p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition cursor-pointer items-start" onclick="viewMessageDetails('${msg.correlation_key}')">
-                <div class="min-w-0 overflow-hidden">
-                    <div class="flex flex-wrap items-center gap-2 mb-1">
-                        <span class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(msg.sender || 'Unknown')}</span>
-                        <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                        </svg>
-                        <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
-                    </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 truncate" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
-                </div>
-                <div class="flex flex-col items-end gap-1 flex-shrink-0">
-                    <div class="flex items-center gap-2">
-                        <span class="inline-block px-2 py-1 text-xs font-medium rounded ${getStatusClass(msg.status)}">${msg.status || 'unknown'}</span>
-                        ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
-                    </div>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap">${formatTime(msg.time)}</p>
-                </div>
-            </div>
-        `).join('');
-    } catch (error) {
-        console.error('Failed to load recent activity:', error);
-        document.getElementById('recent-activity').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load activity: ${escapeHtml(error.message)}</p>`;
-    }
+function setNetfilterFilters(filters) {
+    netfilterExact = null;
+    currentFilters.netfilter = filters;
 }
 
-function performDashboardSearch() {
-    const query = document.getElementById('dashboard-search-query').value;
-    const status = document.getElementById('dashboard-search-status').value;
-
-    // Set filters on Messages page
-    document.getElementById('messages-filter-search').value = query;
-    document.getElementById('messages-filter-sender').value = '';
-    document.getElementById('messages-filter-recipient').value = '';
-    document.getElementById('messages-filter-direction').value = '';
-    document.getElementById('messages-filter-status').value = status;
-    document.getElementById('messages-filter-user').value = '';
-
-    // Apply filters
-    currentFilters.messages = {
-        search: query,
-        status: status
-    };
-    currentPage.messages = 1;
-
-    // Switch to Messages tab and load
-    switchTab('messages');
-}
-
-// =============================================================================
-// NETFILTER LOGS
-// =============================================================================
-
-function applyNetfilterFilters() {
-    currentFilters.netfilter = {
+function netfilterFilterFields() {
+    return {
         ip: document.getElementById('netfilter-filter-ip').value,
         username: document.getElementById('netfilter-filter-username').value,
         action: document.getElementById('netfilter-filter-action').value,
         country_code: document.getElementById('netfilter-filter-country').value
     };
+}
+
+function netfilterWithExact(fields) {
+    const x = netfilterExact;
+    if (x && ((x.ip && (fields.ip || '') !== x.ip) || (x.username && (fields.username || '') !== x.username))) netfilterExact = null;
+    if (!netfilterExact) return fields;
+    return {
+        ...fields, ...(x.ip ? { exact_ip: 'true' } : {}), ...(x.username ? { exact_username: 'true' } : {}),
+        ...(x.domain ? { username_domain: x.domain } : {}),
+        ...(x.start_date ? { start_date: x.start_date } : {}), ...(x.end_date ? { end_date: x.end_date } : {}),
+    };
+}
+
+function renderNetfilterExact() {
+    const slot = document.getElementById('netfilter-exact');
+    if (!slot) return;
+    const x = netfilterExact;
+    const what = !x ? '' : x.ip ? ['IP', x.ip] : x.username ? ['Account', x.username] : x.domain ? ['Accounts on', x.domain] : '';
+    slot.innerHTML = what ? `<span class="ui-sec-filter" title="Matched whole, not as a part of a longer value"><span>${escapeHtml(what[0])} <bdi>${escapeHtml(what[1])}</bdi>${x.period ? `, ${escapeHtml(x.period)}` : ''}</span><button type="button" onclick="clearNetfilterExact()" aria-label="Remove this filter" title="Remove this filter">&times;</button></span>` : '';
+}
+
+function clearNetfilterExact() {
+    if (netfilterExact) {
+        if (netfilterExact.ip) document.getElementById('netfilter-filter-ip').value = '';
+        if (netfilterExact.username) document.getElementById('netfilter-filter-username').value = '';
+    }
+    netfilterExact = null;
+    applyNetfilterFilters();
+}
+
+function applyNetfilterFilters() {
+    currentFilters.netfilter = netfilterWithExact(netfilterFilterFields());
     currentPage.netfilter = 1;
     loadNetfilterLogs();
 }
@@ -1554,231 +3472,18 @@ function clearNetfilterFilters() {
     document.getElementById('netfilter-filter-username').value = '';
     document.getElementById('netfilter-filter-action').value = '';
     document.getElementById('netfilter-filter-country').value = '';
-    currentFilters.netfilter = {};
+    setNetfilterFilters({});
     currentPage.netfilter = 1;
     loadNetfilterLogs();
 }
 
-let securityCountryChart = null;
-
-async function loadSecurityCountryChart(days = 30) {
-    // Update period button styles
-    document.querySelectorAll('.country-chart-period-btn').forEach(btn => {
-        btn.className = 'country-chart-period-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-    });
-    const activeBtn = document.getElementById(`country-chart-${days}d`);
-    if (activeBtn) {
-        activeBtn.className = 'country-chart-period-btn px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors';
-    }
-
-    try {
-        const response = await authenticatedFetch(`/api/logs/netfilter/stats/by-country?days=${days}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const result = await response.json();
-        const data = result.data || [];
-
-        const container = document.getElementById('country-chart-container');
-        const emptyMsg = document.getElementById('country-chart-empty');
-
-        // Filter out countries with 0 total (ban+warning+unban)
-        const filteredData = data.filter(d => (d.ban + d.warning + d.unban) > 0);
-
-        if (filteredData.length === 0) {
-            container.classList.add('hidden');
-            emptyMsg.classList.remove('hidden');
-            return;
-        }
-        container.classList.remove('hidden');
-        emptyMsg.classList.add('hidden');
-
-
-        // Preload flag images for chart labels
-        const flagImages = {};
-        const flagPromises = filteredData.map(d => {
-            const url = getFlagUrl(d.country_code, '24x18');
-            if (!url) return Promise.resolve();
-            return new Promise(resolve => {
-                const img = new Image();
-                img.onload = () => { flagImages[d.country_code] = img; resolve(); };
-                img.onerror = () => resolve();
-                img.src = url;
-            });
-        });
-        await Promise.all(flagPromises);
-
-
-        // Destroy old chart if exists
-        if (securityCountryChart) {
-            securityCountryChart.destroy();
-            securityCountryChart = null;
-        }
-
-        const isDark = document.documentElement.classList.contains('dark');
-        const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
-        const textColor = isDark ? '#d1d5db' : '#374151';
-
-        // Dataset visibility state: track which action types are shown
-        const datasetKeys = ['ban', 'warning', 'unban'];
-        const visibleSets = { ban: true, warning: true, unban: true };
-
-        const datasetColors = {
-            ban:     isDark ? 'rgba(239,68,68,0.8)' : 'rgba(220,38,38,0.8)',
-            warning: isDark ? 'rgba(251,191,36,0.8)' : 'rgba(217,119,6,0.8)',
-            unban:   isDark ? 'rgba(34,197,94,0.8)' : 'rgba(22,163,74,0.8)'
-        };
-        const datasetLabels = { ban: 'Ban', warning: 'Warning', unban: 'Unban' };
-
-        // Build chart data filtered by visible datasets
-        function buildChartData() {
-            // Filter: only keep countries that have > 0 events in any VISIBLE dataset
-            const visible = filteredData.filter(d => {
-                let sum = 0;
-                for (const key of datasetKeys) {
-                    if (visibleSets[key]) sum += d[key];
-                }
-                return sum > 0;
-            });
-
-            // Sort by visible total descending
-            visible.sort((a, b) => {
-                let sumA = 0, sumB = 0;
-                for (const key of datasetKeys) {
-                    if (visibleSets[key]) { sumA += a[key]; sumB += b[key]; }
-                }
-                return sumB - sumA;
-            });
-
-            return visible;
-        }
-
-        function updateChart() {
-            const visible = buildChartData();
-
-            if (visible.length === 0) {
-                container.classList.add('hidden');
-                emptyMsg.classList.remove('hidden');
-                return;
-            }
-            container.classList.remove('hidden');
-            emptyMsg.classList.add('hidden');
-
-            // Dynamic height
-            const chartHeight = Math.min(350, Math.max(120, visible.length * 32));
-            container.style.height = chartHeight + 'px';
-
-            // Update chart data in place
-            securityCountryChart.data.labels = visible.map(d => d.country_name);
-            datasetKeys.forEach((key, i) => {
-                securityCountryChart.data.datasets[i].data = visible.map(d => d[key]);
-            });
-
-            // Store visible data reference for flag plugin and tooltip
-            securityCountryChart._visibleData = visible;
-
-            securityCountryChart.update();
-        }
-
-        const initialVisible = buildChartData();
-
-        // Dynamic height
-        const chartHeight = Math.min(350, Math.max(120, initialVisible.length * 32));
-        container.style.height = chartHeight + 'px';
-
-        const ctx = document.getElementById('security-country-chart').getContext('2d');
-        securityCountryChart = new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels: initialVisible.map(d => d.country_name),
-                datasets: datasetKeys.map(key => ({
-                    label: datasetLabels[key],
-                    data: initialVisible.map(d => d[key]),
-                    backgroundColor: datasetColors[key],
-                    borderRadius: 3
-                }))
-            },
-            options: {
-                indexAxis: 'y',
-                responsive: true,
-                maintainAspectRatio: false,
-                plugins: {
-                    legend: {
-                        position: 'top',
-                        labels: { color: textColor, padding: 15, usePointStyle: true, pointStyle: 'rectRounded' },
-                        onClick: (e, legendItem, legend) => {
-                            const key = datasetKeys[legendItem.datasetIndex];
-                            visibleSets[key] = !visibleSets[key];
-
-                            // Toggle the dataset hidden state
-                            const meta = legend.chart.getDatasetMeta(legendItem.datasetIndex);
-                            meta.hidden = !visibleSets[key];
-
-                            // Rebuild data with only countries that have visible events
-                            updateChart();
-                        }
-                    },
-                    tooltip: {
-                        callbacks: {
-                            title: (items) => items[0].label,
-                            afterTitle: (items) => {
-                                const d = securityCountryChart._visibleData?.[items[0].dataIndex];
-                                if (!d) return '';
-                                let sum = 0;
-                                for (const key of datasetKeys) {
-                                    if (visibleSets[key]) sum += d[key];
-                                }
-                                return `Total: ${sum} events`;
-                            }
-                        }
-                    }
-                },
-                scales: {
-                    x: {
-                        stacked: true,
-                        grid: { color: gridColor },
-                        ticks: { color: textColor }
-                    },
-                    y: {
-                        stacked: true,
-                        grid: { display: false },
-                        ticks: { color: textColor, padding: 30 }
-                    }
-                },
-                layout: {
-                    padding: { left: 8 }
-                }
-            },
-            plugins: [{
-                id: 'flagIcons',
-                afterDraw: (chart) => {
-                    const yScale = chart.scales.y;
-                    if (!yScale) return;
-                    const visible = chart._visibleData || initialVisible;
-                    const ctx = chart.ctx;
-                    yScale.ticks.forEach((tick, i) => {
-                        const d = visible[i];
-                        if (!d) return;
-                        const flagImg = flagImages[d.country_code];
-                        if (!flagImg) return;
-                        const y = yScale.getPixelForTick(i);
-                        const xPos = yScale.right - 28;
-                        ctx.drawImage(flagImg, xPos, y - 6, 24, 18);
-                    });
-                }
-            }]
-        });
-
-        // Store initial visible data reference
-        securityCountryChart._visibleData = initialVisible;
-    } catch (e) {
-        console.error('Failed to load security country chart:', e);
-    }
-}
-
 async function loadNetfilterLogs(page = 1) {
     const container = document.getElementById('netfilter-logs');
+    uiFilterBarSync();
+    renderNetfilterExact();
 
     try {
-        container.innerHTML = '<div class="text-center py-8"><div class="loading mx-auto mb-4"></div><p class="text-gray-500 dark:text-gray-400">Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
 
         const filters = currentFilters.netfilter || {};
         const params = new URLSearchParams({
@@ -1791,435 +3496,153 @@ async function loadNetfilterLogs(page = 1) {
 
         const response = await authenticatedFetch(`/api/logs/netfilter?${params}`);
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
         console.log('Netfilter data:', data);
 
-        // Store in cache for smart refresh comparison
         lastDataCache.netfilter = data;
 
-        // Use shared render function (includes GeoIP info & unban buttons)
         renderNetfilterData(data);
 
         currentPage.netfilter = page;
     } catch (error) {
         console.error('Failed to load Netfilter logs:', error);
-        document.getElementById('netfilter-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load logs: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('netfilter-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load logs: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton(`loadNetfilterLogs(${Number(page) || 1})`)}</p>`;
         const countEl = document.getElementById('security-count');
         if (countEl) countEl.textContent = '';
     }
 }
 
-// =============================================================================
-// FAIL2BAN SETTINGS
-// =============================================================================
-
 let fail2banSettingsLoaded = false;
 let fail2banActiveBans = null;
 let fail2banBlacklist = [];
+let fail2banWhitelist = [];
+let fail2banPermBans = [];
+let fail2banLegacy = [];
+let fail2banPolicy = null;
 
 async function loadFail2BanSettings() {
-    // Only load once per session (settings don't change often)
     if (fail2banSettingsLoaded) return;
-
-    const settingsContainer = document.getElementById('fail2ban-settings');
-    const ipListsContainer = document.getElementById('fail2ban-ip-lists');
-    if (!settingsContainer) return;
-
     try {
         const response = await authenticatedFetch('/api/fail2ban');
-
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
+        if (!response.ok) throw await responseError(response);
         const data = await response.json();
-        const canEdit = mailcowRwConfigured;
+        const list = value => (value || '').replace(/\n/g, ',').split(',').map(e => e.trim()).filter(e => e);
         fail2banSettingsLoaded = true;
+        fail2banLoadError = false;
         fail2banActiveBans = data.active_bans || [];
-
-        // Store blacklist entries globally for button logic
-        const rawBlacklist = data.blacklist || '';
-        fail2banBlacklist = rawBlacklist.replace(/\n/g, ',').split(',').map(e => e.trim()).filter(e => e);
-
-        // Re-render netfilter logs if they were already loaded (race condition fix)
-        // Now after blacklist is loaded, so buttons correctly reflect blacklist state
-        if (lastDataCache.netfilter && mailcowRwConfigured) {
-            renderNetfilterData(lastDataCache.netfilter);
-        }
-
-        // Parse for UI display
-        const whitelistEntries = (data.whitelist || '').split('\n').filter(e => e.trim());
-        const blacklistEntries = fail2banBlacklist;
-        const permBans = data.perm_bans || [];
-
-        // Render settings as editable form or read-only
-        const rwBanner = canEdit ? '' : `
-            <div class="mb-4 px-4 py-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300 text-sm flex items-center gap-2">
-                <span class="text-lg">🔒</span>
-                <span>Editing requires a <strong>Read-Write API key</strong> (<code>MAILCOW_API_KEY_RW</code>). Configure it in Settings → Mailcow → Connection.</span>
-            </div>
-        `;
-
-        settingsContainer.innerHTML = `
-            ${rwBanner}
-            <form id="fail2ban-edit-form">
-                ${canEdit ? `
-                    <div class="mb-3 flex justify-end" id="fail2ban-edit-btn-row">
-                        <button type="button" id="fail2ban-enable-edit-btn"
-                            class="px-3 py-1.5 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                            Edit Settings
-                        </button>
-                    </div>
-                ` : ''}
-                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Ban Time (seconds)</label>
-                        <input type="number" name="ban_time" value="${data.ban_time}" min="60"
-                            class="w-full px-2 py-1.5 text-sm font-semibold rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            disabled />
-                        <div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">${formatSeconds(data.ban_time)}</div>
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Max. Ban Time (seconds)</label>
-                        <input type="number" name="max_ban_time" value="${data.max_ban_time}" min="60"
-                            class="w-full px-2 py-1.5 text-sm font-semibold rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            disabled />
-                        <div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">${formatSeconds(data.max_ban_time)}</div>
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Ban Time Increment</label>
-                        <div class="mt-1">
-                            <label class="relative inline-flex items-center cursor-pointer opacity-60" id="fail2ban-increment-label">
-                                <input type="checkbox" name="ban_time_increment" ${data.ban_time_increment ? 'checked' : ''} disabled
-                                    class="sr-only peer" />
-                                <div class="w-9 h-5 bg-gray-300 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-300 dark:peer-focus:ring-blue-800 rounded-full peer dark:bg-gray-600 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all dark:border-gray-600 peer-checked:bg-blue-600"></div>
-                                <span class="ml-2 text-sm text-gray-700 dark:text-gray-300">${data.ban_time_increment ? 'Enabled' : 'Disabled'}</span>
-                            </label>
-                        </div>
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Max. Attempts</label>
-                        <input type="number" name="max_attempts" value="${data.max_attempts}" min="1"
-                            class="w-full px-2 py-1.5 text-sm font-semibold rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            disabled />
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Retry Window (seconds)</label>
-                        <input type="number" name="retry_window" value="${data.retry_window}" min="1"
-                            class="w-full px-2 py-1.5 text-sm font-semibold rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                            disabled />
-                        <div class="text-xs text-gray-400 dark:text-gray-500 mt-0.5">${formatSeconds(data.retry_window)}</div>
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Subnet Ban IPv4</label>
-                        <div class="flex items-center gap-1">
-                            <span class="text-sm text-gray-500 dark:text-gray-400">/</span>
-                            <input type="number" name="netban_ipv4" value="${data.netban_ipv4}" min="8" max="32"
-                                class="w-full px-2 py-1.5 text-sm font-semibold font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                disabled />
-                        </div>
-                    </div>
-
-                    <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1 block">Subnet Ban IPv6</label>
-                        <div class="flex items-center gap-1">
-                            <span class="text-sm text-gray-500 dark:text-gray-400">/</span>
-                            <input type="number" name="netban_ipv6" value="${data.netban_ipv6}" min="8" max="128"
-                                class="w-full px-2 py-1.5 text-sm font-semibold font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                                disabled />
-                        </div>
-                    </div>
-                </div>
-
-                <div class="mt-4 flex justify-end" id="fail2ban-save-row" style="display:none">
-                    <button type="submit" id="fail2ban-save-btn"
-                        class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow transition-colors focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 flex items-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                        Save Settings
-                    </button>
-                </div>
-            </form>
-        `;
-
-        // Build unified active bans list (permanent + temporary)
-        const activeBans = data.active_bans || [];
-        const permBanNetworks = new Set(permBans.map(b => b.network || b.ip));
-        // Temporary bans = active_bans entries NOT in perm_bans
-        const tempBans = activeBans.filter(b => !permBanNetworks.has(b.network));
-        // Sort both lists by IP address
-        const ipSort = (a, b) => (a.ip || a.network || '').localeCompare(b.ip || b.network || '', undefined, { numeric: true });
-        permBans.sort(ipSort);
-        tempBans.sort(ipSort);
-        const totalBans = permBans.length + tempBans.length;
-
-        // Render IP lists in separate accordion (editable textareas)
-        if (ipListsContainer) {
-            ipListsContainer.innerHTML = `
-                <form id="fail2ban-ip-form">
-                    ${canEdit ? `
-                        <div class="mb-3 flex justify-end" id="fail2ban-ip-edit-btn-row">
-                            <button type="button" id="fail2ban-ip-enable-edit-btn"
-                                class="px-3 py-1.5 bg-gray-200 dark:bg-gray-600 hover:bg-gray-300 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-200 text-sm font-medium rounded-lg transition-colors flex items-center gap-1.5">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                                Edit IP Lists
-                            </button>
-                        </div>
-                    ` : ''}
-                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                            <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Allowlisted <span class="text-gray-400 dark:text-gray-500">(${whitelistEntries.length})</span></label>
-                            <textarea name="whitelist" rows="4" placeholder="One IP/network per line"
-                                class="w-full px-2 py-1.5 text-sm font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-green-700 dark:text-green-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
-                                disabled>${escapeHtml((data.whitelist || '').replace(/,/g, '\n'))}</textarea>
-                        </div>
-
-                        <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                            <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2 block">Denylisted <span class="text-gray-400 dark:text-gray-500">(${blacklistEntries.length})</span></label>
-                            <textarea name="blacklist" rows="4" placeholder="One IP/network per line"
-                                class="w-full px-2 py-1.5 text-sm font-mono rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-red-700 dark:text-red-400 focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-y"
-                                disabled>${escapeHtml((data.blacklist || '').replace(/,/g, '\n'))}</textarea>
-                        </div>
-                    </div>
-
-                    <div class="mt-3 px-1 text-xs text-gray-500 dark:text-gray-400 italic">
-                        A denylisted host or network will always outweigh an allowlisted entity. List updates will take a few seconds to be applied.
-                    </div>
-
-                    <div class="mt-3 flex justify-end" id="fail2ban-ip-save-row" style="display:none">
-                        <button type="submit" id="fail2ban-ip-save-btn"
-                            class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg shadow transition-colors focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:focus:ring-offset-gray-800 flex items-center gap-2">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                            Save IP Lists
-                        </button>
-                    </div>
-                </form>
-
-                <!-- Active Bans List -->
-                <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                    <div class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3">
-                        Active Bans <span class="text-gray-400 dark:text-gray-500">(${totalBans})</span>
-                    </div>
-                    ${totalBans > 0 ? `
-                        <div class="space-y-2">
-                            ${permBans.map(ban => `
-                                <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
-                                    <div class="flex items-center gap-3">
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400">Permanent</span>
-                                        <span class="text-sm font-mono text-gray-900 dark:text-white">${escapeHtml(ban.network || ban.ip)}</span>
-                                    </div>
-                                </div>
-                            `).join('')}
-                            ${tempBans.map(ban => `
-                                <div class="flex items-center justify-between bg-gray-50 dark:bg-gray-700/50 rounded-lg px-3 py-2">
-                                    <div class="flex items-center gap-3">
-                                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">Temporary</span>
-                                        <span class="text-sm font-mono text-gray-900 dark:text-white">${escapeHtml(ban.network || ban.ip)}</span>
-                                        ${ban.banned_until ? `<span class="text-xs text-gray-500 dark:text-gray-400">${escapeHtml(ban.banned_until)} left</span>` : ''}
-                                        ${ban.queued_for_unban ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">Unbanning...</span>` : ''}
-                                    </div>
-                                    ${canEdit && !ban.queued_for_unban ? `
-                                        <button type="button" onclick="unbanIP('${escapeJsArg(ban.ip || ban.network)}', this)"
-                                            class="px-2.5 py-1 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-400 hover:bg-red-50 hover:border-red-300 hover:text-red-700 dark:hover:bg-red-900/20 dark:hover:border-red-700 dark:hover:text-red-400 transition-colors">
-                                            Unban
-                                        </button>
-                                    ` : ''}
-                                </div>
-                            `).join('')}
-                        </div>
-                    ` : '<div class="text-sm text-gray-400 dark:text-gray-500">No active bans</div>'}
-                </div>
-            `;
-        }
-
-        // Attach save handlers if edit is enabled
-        if (canEdit) {
-            // Edit Settings button handler
-            const editSettingsBtn = document.getElementById('fail2ban-enable-edit-btn');
-            if (editSettingsBtn) {
-                editSettingsBtn.addEventListener('click', () => {
-                    // Enable all inputs in settings form
-                    const form = document.getElementById('fail2ban-edit-form');
-                    form.querySelectorAll('input').forEach(el => { el.disabled = false; });
-                    // Fix toggle opacity
-                    const incrementLabel = document.getElementById('fail2ban-increment-label');
-                    if (incrementLabel) incrementLabel.classList.remove('opacity-60');
-                    // Hide edit button, show save button
-                    document.getElementById('fail2ban-edit-btn-row').style.display = 'none';
-                    document.getElementById('fail2ban-save-row').style.display = 'flex';
-                });
-            }
-
-            // Edit IP Lists button handler
-            const editIpBtn = document.getElementById('fail2ban-ip-enable-edit-btn');
-            if (editIpBtn) {
-                editIpBtn.addEventListener('click', () => {
-                    const form = document.getElementById('fail2ban-ip-form');
-                    form.querySelectorAll('textarea').forEach(el => { el.disabled = false; });
-                    document.getElementById('fail2ban-ip-edit-btn-row').style.display = 'none';
-                    document.getElementById('fail2ban-ip-save-row').style.display = 'flex';
-                });
-            }
-
-            // Save settings form
-            const settingsForm = document.getElementById('fail2ban-edit-form');
-            if (settingsForm) {
-                settingsForm.addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    const btn = document.getElementById('fail2ban-save-btn');
-                    const origText = btn.innerHTML;
-                    btn.disabled = true;
-                    btn.innerHTML = '<div class="loading-sm mr-2"></div> Saving...';
-
-                    try {
-                        // Collect ALL settings values (must send everything)
-                        const ipForm = document.getElementById('fail2ban-ip-form');
-                        const whitelist = ipForm ? ipForm.querySelector('[name="whitelist"]').value.split('\n').filter(l => l.trim()).join(',') : data.whitelist || '';
-                        const blacklist = ipForm ? ipForm.querySelector('[name="blacklist"]').value.split('\n').filter(l => l.trim()).join(',') : data.blacklist || '';
-
-                        const payload = {
-                            attr: {
-                                ban_time: settingsForm.querySelector('[name="ban_time"]').value,
-                                max_ban_time: settingsForm.querySelector('[name="max_ban_time"]').value,
-                                ban_time_increment: settingsForm.querySelector('[name="ban_time_increment"]').checked ? '1' : '0',
-                                max_attempts: settingsForm.querySelector('[name="max_attempts"]').value,
-                                retry_window: settingsForm.querySelector('[name="retry_window"]').value,
-                                netban_ipv4: settingsForm.querySelector('[name="netban_ipv4"]').value,
-                                netban_ipv6: settingsForm.querySelector('[name="netban_ipv6"]').value,
-                                whitelist: whitelist,
-                                blacklist: blacklist
-                            }
-                        };
-
-                        const res = await authenticatedFetch('/api/fail2ban', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
-
-                        const result = await res.json();
-                        if (res.ok && result.status === 'success') {
-                            showToast('Fail2Ban settings saved successfully', 'success');
-                            // Reset loaded flag so next open fetches fresh data
-                            fail2banSettingsLoaded = false;
-                        } else {
-                            showToast('Failed to save Fail2Ban settings: ' + (result.msg || result.detail || 'Unknown error'), 'error');
-                        }
-                    } catch (err) {
-                        showToast('Failed to save Fail2Ban settings: ' + err.message, 'error');
-                    } finally {
-                        btn.disabled = false;
-                        btn.innerHTML = origText;
-                    }
-                });
-            }
-
-            // Save IP lists form
-            const ipForm = document.getElementById('fail2ban-ip-form');
-            if (ipForm) {
-                ipForm.addEventListener('submit', async (e) => {
-                    e.preventDefault();
-                    const btn = document.getElementById('fail2ban-ip-save-btn');
-                    const origText = btn.innerHTML;
-                    btn.disabled = true;
-                    btn.innerHTML = '<div class="loading-sm mr-2"></div> Saving...';
-
-                    try {
-                        // Collect ALL values from both forms (must send everything)
-                        const sForm = document.getElementById('fail2ban-edit-form');
-                        const whitelist = ipForm.querySelector('[name="whitelist"]').value.split('\n').filter(l => l.trim()).join(',');
-                        const blacklist = ipForm.querySelector('[name="blacklist"]').value.split('\n').filter(l => l.trim()).join(',');
-
-                        const payload = {
-                            attr: {
-                                ban_time: sForm.querySelector('[name="ban_time"]').value,
-                                max_ban_time: sForm.querySelector('[name="max_ban_time"]').value,
-                                ban_time_increment: sForm.querySelector('[name="ban_time_increment"]').checked ? '1' : '0',
-                                max_attempts: sForm.querySelector('[name="max_attempts"]').value,
-                                retry_window: sForm.querySelector('[name="retry_window"]').value,
-                                netban_ipv4: sForm.querySelector('[name="netban_ipv4"]').value,
-                                netban_ipv6: sForm.querySelector('[name="netban_ipv6"]').value,
-                                whitelist: whitelist,
-                                blacklist: blacklist
-                            }
-                        };
-
-                        const res = await authenticatedFetch('/api/fail2ban', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(payload)
-                        });
-
-                        const result = await res.json();
-                        if (res.ok && result.status === 'success') {
-                            showToast('Fail2Ban IP lists saved successfully', 'success');
-                            fail2banSettingsLoaded = false;
-                        } else {
-                            showToast('Failed to save Fail2Ban IP lists: ' + (result.msg || result.detail || 'Unknown error'), 'error');
-                        }
-                    } catch (err) {
-                        showToast('Failed to save Fail2Ban IP lists: ' + err.message, 'error');
-                    } finally {
-                        btn.disabled = false;
-                        btn.innerHTML = origText;
-                    }
-                });
-            }
-        }
+        fail2banPermBans = data.perm_bans || [];
+        fail2banBlacklist = list(data.blacklist);
+        fail2banWhitelist = list(data.whitelist);
+        fail2banLegacy = data.legacy_entries || [];
+        fail2banPolicy = {
+            ban_time: data.ban_time, max_ban_time: data.max_ban_time, ban_time_increment: !!Number(data.ban_time_increment),
+            max_attempts: data.max_attempts, retry_window: data.retry_window,
+            netban_ipv4: data.netban_ipv4, netban_ipv6: data.netban_ipv6
+        };
     } catch (error) {
         console.error('Failed to load Fail2Ban settings:', error);
-        settingsContainer.innerHTML = `<p class="text-red-500 text-center py-4">Failed to load Fail2Ban settings: ${escapeHtml(error.message)}</p>`;
-        if (ipListsContainer) {
-            ipListsContainer.innerHTML = `<p class="text-red-500 text-center py-4">Failed to load IP lists</p>`;
-        }
+        fail2banLoadError = true;
+        fail2banSettingsLoaded = false;
     }
+    renderSecurityOverview();
+    refreshSecurityAddresses();
+    if (!securityListsTyping()) renderSecurityLists();
+    if (!securityEditing()) renderSecuritySettings();
+    if (lastDataCache.netfilter && mailcowRwConfigured) renderNetfilterData(lastDataCache.netfilter);
 }
 
-// =============================================================================
-// Part 2: Queue, Quarantine, Messages, Status, Postfix Details
-// =============================================================================
-
-// =============================================================================
-// QUEUE
-// =============================================================================
-
 let allQueueData = [];
+let queueSuppressOn = false;
+let queueAsked = 0;
+let queueApplied = 0;
+let queueLoading = false;
+
+function queueListKept() {
+    return authenticatedFetch('/api/suppressions/config')
+        .then(r => (r.ok ? r.json() : null))
+        .then(config => !!(config && config.list_kept === true))
+        .catch(() => false);
+}
+
+function queueTakeTurn(id) {
+    if (id < queueApplied) return false;
+    queueApplied = id;
+    return true;
+}
 
 async function loadQueue() {
     const container = document.getElementById('queue-logs');
+    uiFilterBarSync();
+    const id = ++queueAsked;
 
     try {
-        container.innerHTML = '<div class="text-center py-8"><div class="loading mx-auto mb-4"></div><p class="text-gray-500 dark:text-gray-400">Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
+        queueLoading = true;
 
         console.log('Loading Queue...');
 
+        const kept = queueListKept();
         const response = await authenticatedFetch('/api/queue');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
         console.log('Queue data:', data);
+        await rwStatusReady;
+        const listKept = await kept;
+        if (!queueTakeTurn(id)) return;
 
+        queueLoading = false;
+        queueSuppressOn = listKept;
         allQueueData = data.data || [];
+        updateQueueSummary();
         applyQueueFilters();
     } catch (error) {
+        if (!queueTakeTurn(id)) return;
+        queueLoading = false;
         console.error('Failed to load queue:', error);
-        document.getElementById('queue-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load queue: ${escapeHtml(error.message)}</p>`;
+        document.getElementById('queue-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load queue: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadQueue()')}</p>`;
         const countEl = document.getElementById('queue-count');
         if (countEl) countEl.textContent = '';
     }
 }
 
+function updateQueueSummary() {
+    const el = document.getElementById('queue-summary');
+    if (!el) return;
+    if (!allQueueData.length) {
+        el.textContent = 'The queue is empty.';
+        return;
+    }
+    const count = name => allQueueData.filter(i => (i.queue_name || '').toLowerCase() === name).length;
+    const parts = [];
+    if (count('deferred')) parts.push(`${count('deferred')} waiting to retry`);
+    if (count('hold')) parts.push(`${count('hold')} on hold`);
+    if (count('active')) parts.push(`${count('active')} being delivered`);
+    const other = allQueueData.length - count('deferred') - count('hold') - count('active');
+    if (other) parts.push(`${other} other`);
+    el.textContent = `${allQueueData.length} ${allQueueData.length === 1 ? 'message' : 'messages'}: ${parts.join(', ')}. Postfix retries deferred mail on its own.`;
+}
+
+function keepCheckedRows(selector, draw, update) {
+    const checked = new Set([...document.querySelectorAll(`${selector}:checked`)].map(cb => cb.value));
+    draw();
+    if (!checked.size) return;
+    document.querySelectorAll(selector).forEach(cb => { if (checked.has(cb.value)) cb.checked = true; });
+    update();
+}
+
+let queueActing = 0;
+
 function applyQueueFilters() {
+    keepCheckedRows('.queue-checkbox', drawQueueRows, queueUpdateSelection);
+}
+
+function drawQueueRows() {
     const searchTerm = document.getElementById('queue-filter-search')?.value.toLowerCase() || '';
     const queueId = document.getElementById('queue-filter-queue-id')?.value.toLowerCase() || '';
 
@@ -2240,138 +3663,84 @@ function applyQueueFilters() {
 
     const container = document.getElementById('queue-logs');
 
-    // Update count display
     const countEl = document.getElementById('queue-count');
     if (countEl) {
-        countEl.textContent = `(${filteredData.length.toLocaleString()} items)`;
+        countEl.textContent = uiCountLabel(filteredData.length, 'message', 'messages');
     }
 
     if (filteredData.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No matching queue entries</p>';
+        container.innerHTML = searchTerm || queueId ? `
+            <div class="ui-empty">
+                <p><b>No queued messages match these filters</b></p>
+                <p><button onclick="clearQueueFilters()" class="ui-btn ui-btn-sm">Clear filters</button></p>
+            </div>` : '<p class="ui-empty">Mail waiting to be delivered or retried shows up here.</p>';
         return;
     }
 
-    const canAct = mailcowRwConfigured;
+    const mayAct = userCan('outbound', 'write');
+    const canAct = mailcowRwConfigured && mayAct;
+
+    const lockedNote = canAct || !mayAct ? '' : `<div class="ui-list-note">${uiLocked('Queue actions are locked', `Retry, hold, release, delete and flush ${UI_RW_KEY_TEXT}`)}</div>`;
+    const cols = canAct
+        ? '--ui-cols: 20px minmax(200px, 1.6fr) 84px minmax(240px, 2.8fr) 70px 318px; --ui-table-min: 1000px'
+        : '--ui-cols: minmax(200px, 1.6fr) 84px minmax(240px, 2.8fr) 70px 104px; --ui-table-min: 740px';
 
     container.innerHTML = `
+        ${lockedNote}
+        <div class="ui-table ui-stack" data-sort-at="queue-filter-search" data-sort-name="mail queue" style="${cols}">
         ${canAct ? `
-            <div class="mb-4 flex flex-wrap items-center gap-2">
-                <button onclick="queueSelectAll()" id="queue-select-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                    Select All
-                </button>
-                <button onclick="queueBulkRetry()" id="queue-bulk-retry-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white hover:bg-blue-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                    Retry Selected
-                </button>
-                <button onclick="queueBulkDelete()" id="queue-bulk-delete-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    Delete Selected
-                </button>
-                <span id="queue-selection-count" class="hidden text-xs text-gray-500 dark:text-gray-400"></span>
-
-                <div class="flex-1"></div>
-
-                <button onclick="queueFlushAll()" id="queue-flush-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white hover:bg-blue-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+            <div class="ui-toolbar ui-table-tools">
+                <button onclick="queueSelectAll()" id="queue-select-all-btn" class="ui-btn ui-btn-sm">Select All</button>
+                <button onclick="queueBulkRetry()" id="queue-bulk-retry-btn" class="hidden ui-btn ui-btn-sm ui-btn-primary">Retry Selected</button>
+                <button onclick="queueBulkDelete()" id="queue-bulk-delete-btn" class="hidden ui-btn ui-btn-sm ui-btn-danger-solid">Delete Selected</button>
+                <span id="queue-selection-count" class="hidden ui-muted"></span>
+                <span class="ui-toolbar-gap"></span>
+                <button onclick="queueFlushAll()" id="queue-flush-all-btn" class="ui-btn ui-btn-sm ui-btn-primary" title="Retry delivery of every message in the queue">
+                    <svg width="14" height="14" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
                     Flush All
                 </button>
-                <button onclick="queueDeleteAll()" id="queue-delete-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    Delete All
-                </button>
+                <button onclick="queueDeleteAll()" id="queue-delete-all-btn" class="ui-btn ui-btn-sm ui-btn-danger-solid">Delete All</button>
             </div>
         ` : ''}
-        <div class="space-y-4">
+            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span data-sort-kind="text">Recipient</span><span data-sort-kind="text">State</span><span data-sort-kind="text">Last response</span><span class="ui-td-end" data-sort-kind="number">Size</span><span class="ui-td-end">Actions</span></div>
             ${filteredData.map(item => {
                 const qid = item.queue_id || '';
                 const queueName = (item.queue_name || '').toLowerCase();
                 const isHold = queueName === 'hold';
-                // Status badge colors
-                const statusColors = {
-                    hold: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-800 dark:text-yellow-300',
-                    deferred: 'bg-orange-100 dark:bg-orange-900/30 text-orange-800 dark:text-orange-300',
-                    active: 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300',
-                    incoming: 'bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300',
-                    bounce: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300',
-                    corrupt: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300',
-                };
-                const badgeColor = statusColors[queueName] || 'bg-gray-100 dark:bg-gray-600 text-gray-800 dark:text-gray-200';
+                const queueTone = { hold: '', deferred: 'warn', active: 'ok', incoming: 'info', bounce: 'fail', corrupt: 'fail' }[queueName] || '';
+                const stateText = isHold ? 'On hold' : (item.queue_name || 'unknown').replace(/^./, c => c.toUpperCase());
+                const recipients = item.recipients.map(r => {
+                    const email = r.split(' ')[0].replace(/[<>]/g, '').trim();
+                    const rest = r.includes(' ') ? r.substring(r.indexOf(' ')).trim().replace(/^\((.*)\)$/, '$1') : '';
+                    return { email, response: rest };
+                });
+                const responses = recipients.filter(r => r.response);
+                const queued = new Date(item.arrival_time * 1000).toISOString();
+                const suppress = !queueSuppressOn || !mayAct ? '' : recipients.length === 1
+                    ? `<button onclick="showAddSuppressionModal('${escapeJsArg(recipients[0].email)}', '${escapeJsArg(qid)}')" title="Suppress ${escapeHtml(recipients[0].email)}" class="ui-btn ui-btn-sm">Suppress</button>`
+                    : uiMenu('Suppress', recipients.map(r => `<button type="button" role="menuitem" onclick="showAddSuppressionModal('${escapeJsArg(r.email)}', '${escapeJsArg(qid)}')">${escapeHtml(r.email)}</button>`).join(''));
                 return `
-                <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-gray-50 dark:bg-gray-700/50" data-queue-id="${qid}">
-                    <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start mb-2 gap-2">
-                        <div class="flex-1 flex items-start gap-3">
-                            ${canAct ? `
-                                <input type="checkbox" class="queue-checkbox mt-1 flex-shrink-0 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:bg-gray-700 dark:border-gray-600 cursor-pointer"
-                                    value="${qid}" onchange="queueUpdateSelection()" />
-                            ` : ''}
-                            <div>
-                                <p class="text-sm font-medium text-gray-900 dark:text-white">From: ${copyableText(item.sender)}</p>
-                                <p class="text-sm text-gray-600 dark:text-gray-300">Queue ID: ${copyableText(qid)}</p>
-                            </div>
-                        </div>
-                        <div class="flex items-center gap-2">
-                            <span class="inline-block px-2 py-0.5 text-xs font-semibold rounded ${badgeColor} uppercase">${escapeHtml(item.queue_name || 'unknown')}</span>
-                            <span class="text-xs text-gray-500 dark:text-gray-400">${formatTime(new Date(item.arrival_time * 1000).toISOString())}</span>
-                        </div>
+                <div class="ui-tr ui-q-row" data-queue-id="${escapeHtml(qid)}">
+                    ${canAct ? `<input type="checkbox" class="queue-checkbox ui-check" value="${escapeHtml(qid)}" onchange="queueUpdateSelection()" aria-label="Select ${escapeHtml(qid)}" />` : ''}
+                    <div class="ui-td ui-q-who">
+                        <div>${recipients.map(r => uiEntity('address', r.email)).join(', ')}</div>
+                        <small>From ${uiEntity('address', item.sender)}, queued <span title="${escapeHtml(formatTime(queued))}">${formatAgo(queued)}</span>, ID ${copyableText(qid)}</small>
                     </div>
-                    <div class="mb-2">
-                        <p class="text-sm font-medium text-gray-700 dark:text-gray-300">Recipients:</p>
-                        ${item.recipients.map(r => {
-                            const emailOnly = r.split(' ')[0].replace(/[<>]/g, '').trim();
-                            const errorPart = r.substring(r.indexOf(' ')).trim();
-                            const hasError = errorPart && errorPart !== emailOnly && r.includes(' ');
-                            return `<div class="ml-1 py-0.5">
-                                <span class="text-sm font-medium text-gray-800 dark:text-gray-200">${copyableText(emailOnly)}</span>
-                                ${hasError ? `<p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5 break-words">${escapeHtml(errorPart)}</p>` : ''}
-                            </div>`;
-                        }).join('')}
-                    </div>
-                    <div class="flex flex-wrap items-center justify-between gap-2">
-                        <span class="text-xs text-gray-500 dark:text-gray-400">Size: ${formatSize(item.message_size)}</span>
-                        <div class="flex items-center gap-2 flex-shrink-0">
-                            ${canAct ? `
-                                <button onclick="queueRetry('${qid}')" title="Retry delivery"
-                                    class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors flex items-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                                    Retry
-                                </button>
-                                ${isHold ? `
-                                    <button onclick="queueUnhold('${qid}')" title="Release from hold"
-                                        class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-green-300 dark:border-green-700 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors flex items-center gap-1">
-                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                        Unhold
-                                    </button>
-                                ` : `
-                                    <button onclick="queueHold('${qid}')" title="Hold message"
-                                        class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-yellow-300 dark:border-yellow-700 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-100 dark:hover:bg-yellow-900/30 transition-colors flex items-center gap-1">
-                                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                                        Hold
-                                    </button>
-                                `}
-                                <button onclick="queueDeleteItem('${qid}')" title="Delete from queue"
-                                    class="queue-action-btn px-2.5 py-1 text-xs font-medium rounded-md border border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors flex items-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                    Delete
-                                </button>
-                            ` : ''}
-                            ${item.recipients.map(r => {
-                                const emailOnly = r.split(' ')[0].replace(/[<>]/g, '');
-                                return `
-                                <button onclick="showAddSuppressionModal('${escapeJsArg(emailOnly)}')" title="Suppress ${escapeHtml(emailOnly)}"
-                                    class="px-2.5 py-1 text-xs font-medium rounded-md border border-purple-300 dark:border-purple-700 text-purple-700 dark:text-purple-400 hover:bg-purple-100 dark:hover:bg-purple-900/30 transition-colors flex items-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-                                    Suppress
-                                </button>`;
-                            }).join('')}
-                        </div>
-                    </div>
-                </div>
-            `;
+                    <span class="ui-td">${uiTag(stateText, queueTone)}</span>
+                    <div class="ui-td ui-td-wrap ui-mono ui-q-resp">${responses.length
+                        ? responses.map(r => `<div>${recipients.length > 1 ? `<span class="ui-muted">${escapeHtml(r.email)}:</span> ` : ''}${escapeHtml(r.response)}</div>`).join('')
+                        : `<span class="ui-muted">${isHold ? 'Put on hold' : '-'}</span>`}</div>
+                    <span class="ui-td ui-td-end">${formatSize(item.message_size)}</span>
+                    <span class="ui-td ui-td-end ui-row-actions">
+                    ${canAct ? `
+                        <button onclick="queueRetry('${escapeJsArg(qid)}')" title="Retry delivery" class="queue-action-btn ui-btn ui-btn-sm">Retry</button>
+                        ${isHold
+                            ? `<button onclick="queueUnhold('${escapeJsArg(qid)}')" title="Release from hold" class="queue-action-btn ui-btn ui-btn-sm">Unhold</button>`
+                            : `<button onclick="queueHold('${escapeJsArg(qid)}')" title="Hold message" class="queue-action-btn ui-btn ui-btn-sm">Hold</button>`}
+                        <button onclick="queueDeleteItem('${escapeJsArg(qid)}')" title="Delete from queue" class="queue-action-btn ui-btn ui-btn-sm ui-btn-danger">Delete</button>` : ''}
+                        ${suppress}
+                    </span>
+                </div>`;
             }).join('')}
         </div>
     `;
@@ -2383,13 +3752,16 @@ function clearQueueFilters() {
     applyQueueFilters();
 }
 
-// --- Queue selection helpers ---
-
 function queueUpdateSelection() {
     const checked = document.querySelectorAll('.queue-checkbox:checked');
+    const deleteAll = document.getElementById('queue-delete-all-btn');
+    if (deleteAll) deleteAll.classList.toggle('hidden', checked.length > 0);
     const bulkRetry = document.getElementById('queue-bulk-retry-btn');
     const bulkDelete = document.getElementById('queue-bulk-delete-btn');
     const countLabel = document.getElementById('queue-selection-count');
+    const selectAll = document.getElementById('queue-select-all-btn');
+    const rows = document.querySelectorAll('.queue-checkbox').length;
+    if (selectAll) selectAll.textContent = rows && checked.length === rows ? 'Deselect All' : 'Select All';
 
     if (checked.length > 0) {
         if (bulkRetry) { bulkRetry.classList.remove('hidden'); bulkRetry.classList.add('inline-flex'); }
@@ -2418,18 +3790,16 @@ function queueGetSelectedIds() {
 async function queueBulkRetry() {
     const ids = queueGetSelectedIds();
     if (ids.length === 0) return;
-    if (!await showConfirmModal({ title: 'Retry Delivery', message: `Retry delivery of ${ids.length} message(s)?`, confirmText: 'Retry' })) return;
+    if (!await showConfirmModal({ title: 'Retry delivery', message: `Retry delivery of ${ids.length} message(s)?`, confirmText: 'Retry' })) return;
     await queueAction('deliver', ids);
 }
 
 async function queueBulkDelete() {
     const ids = queueGetSelectedIds();
     if (ids.length === 0) return;
-    if (!await showConfirmModal({ title: 'Delete Messages', message: `Permanently delete ${ids.length} message(s) from the queue?`, confirmText: 'Delete', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Delete messages', message: `Permanently delete ${ids.length} message(s) from the queue? This cannot be undone.`, confirmText: 'Delete', isDangerous: true })) return;
     await queueDeleteRequest(ids);
 }
-
-// --- Queue action helpers ---
 
 async function queueRetry(qid) {
     await queueAction('deliver', [String(qid)]);
@@ -2444,21 +3814,23 @@ async function queueUnhold(qid) {
 }
 
 async function queueDeleteItem(qid) {
-    if (!await showConfirmModal({ title: 'Delete Message', message: 'Delete this message from the queue?', confirmText: 'Delete', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Delete message', message: 'Delete this message from the queue? This cannot be undone.', confirmText: 'Delete', isDangerous: true })) return;
     await queueDeleteRequest([String(qid)]);
 }
 
 async function queueFlushAll() {
-    if (!await showConfirmModal({ title: 'Flush Queue', message: 'Flush (retry delivery of) ALL messages in the queue?', confirmText: 'Flush All' })) return;
+    if (!await showConfirmModal({ title: 'Flush queue', message: 'Flush (retry delivery of) ALL messages in the queue?', confirmText: 'Flush all' })) return;
     await queueAction('flush', ['mailqitems-all']);
 }
 
 async function queueDeleteAll() {
-    if (!await showConfirmModal({ title: 'Delete All', message: 'Permanently delete ALL messages from the queue? This cannot be undone.', confirmText: 'Delete All', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Delete all', message: 'Permanently delete ALL messages from the queue? This cannot be undone.', confirmText: 'Delete all', isDangerous: true })) return;
     await queueAction('super_delete', ['mailqitems-all']);
 }
 
 async function queueAction(action, itemIds) {
+    if (!uiMayAct('outbound')) return;
+    queueActing++;
     document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
         .forEach(el => { el.disabled = true; el.style.opacity = '0.5'; });
 
@@ -2469,24 +3841,27 @@ async function queueAction(action, itemIds) {
             body: JSON.stringify({ items: itemIds, action: action })
         });
 
-        const result = await res.json();
-        if (res.ok && result.status === 'success') {
+        const result = await uiReadJson(res);
+        if (res.ok && result && result.status === 'success') {
             const labels = { deliver: 'Retry delivery', hold: 'Hold', unhold: 'Unhold', flush: 'Flush all', super_delete: 'Delete all' };
-            showToast(result.msg || `${labels[action] || action} completed`, 'success');
+            showToast(mailcowWords(result.msg) || `${labels[action] || action} completed`, 'success');
             lastDataCache.queue = null;
             await loadQueue();
         } else {
-            showToast(`Queue action failed: ` + (result.msg || result.detail || 'Unknown error'), 'error');
+            showToast(`Queue action failed: ` + actionErrorText(res, result), 'error');
         }
     } catch (err) {
-        showToast(`Queue action failed: ` + err.message, 'error');
+        showToast(`Queue action failed: ` + uiErrorText(err), 'error');
     } finally {
+        queueActing--;
         document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
             .forEach(el => { el.disabled = false; el.style.opacity = ''; });
     }
 }
 
 async function queueDeleteRequest(itemIds) {
+    if (!uiMayAct('outbound')) return;
+    queueActing++;
     document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
         .forEach(el => { el.disabled = true; el.style.opacity = '0.5'; });
 
@@ -2497,245 +3872,164 @@ async function queueDeleteRequest(itemIds) {
             body: JSON.stringify({ items: itemIds })
         });
 
-        const result = await res.json();
-        if (res.ok && result.status === 'success') {
-            showToast(result.msg || 'Message deleted from queue', 'success');
+        const result = await uiReadJson(res);
+        if (res.ok && result && result.status === 'success') {
+            showToast(mailcowWords(result.msg) || 'Message deleted from queue', 'success');
             lastDataCache.queue = null;
             await loadQueue();
         } else {
-            showToast('Failed to delete from queue: ' + (result.msg || result.detail || 'Unknown error'), 'error');
+            showToast('Failed to delete from queue: ' + actionErrorText(res, result), 'error');
         }
     } catch (err) {
-        showToast('Failed to delete from queue: ' + err.message, 'error');
+        showToast('Failed to delete from queue: ' + uiErrorText(err), 'error');
     } finally {
+        queueActing--;
         document.querySelectorAll('.queue-action-btn, .queue-checkbox, #queue-flush-all-btn, #queue-delete-all-btn, #queue-select-all-btn, #queue-bulk-retry-btn, #queue-bulk-delete-btn')
             .forEach(el => { el.disabled = false; el.style.opacity = ''; });
     }
 }
 
-// =============================================================================
-// QUARANTINE
-// =============================================================================
-
-// Client-side sort state for the quarantine list ('newest' matches the backend default order)
-let quarantineSortOrder = 'newest';
-// Last quarantine payload rendered (used to re-sort without re-fetching)
 let quarantineLastData = null;
 
-// Return a sorted copy of quarantine items based on quarantineSortOrder.
-// Items without a numeric score are placed last in both score directions.
-function sortQuarantineItems(items) {
-    const sorted = [...items];
-    if (quarantineSortOrder !== 'score_desc' && quarantineSortOrder !== 'score_asc') {
-        return sorted; // 'newest' - keep backend order (newest first)
-    }
-    const scoreOf = (item) => (typeof item.score === 'number' && isFinite(item.score)) ? item.score : null;
-    sorted.sort((a, b) => {
-        const sa = scoreOf(a);
-        const sb = scoreOf(b);
-        if (sa === null && sb === null) return 0;
-        if (sa === null) return 1;
-        if (sb === null) return -1;
-        return quarantineSortOrder === 'score_asc' ? sa - sb : sb - sa;
-    });
-    return sorted;
+function quarantineActionTone(action) {
+    return ['reject', 'discard'].includes(String(action || '').toLowerCase()) ? 'fail' : 'warn';
 }
 
-// Handler for the #quarantine-sort dropdown - re-sorts the already-fetched list
-function applyQuarantineSort() {
-    const select = document.getElementById('quarantine-sort');
-    if (select) quarantineSortOrder = select.value;
-    if (quarantineLastData) {
-        renderQuarantineData(quarantineLastData);
-    } else {
-        loadQuarantine();
-    }
+
+let quarantineAsked = 0;
+let quarantineApplied = 0;
+let quarantineActing = 0;
+
+function quarantineTakeTurn(id) {
+    if (id < quarantineApplied) return false;
+    quarantineApplied = id;
+    return true;
 }
 
 async function loadQuarantine() {
     const container = document.getElementById('quarantine-logs');
+    uiFilterBarSync();
+    const id = ++quarantineAsked;
 
     try {
-        container.innerHTML = '<div class="text-center py-8"><div class="loading mx-auto mb-4"></div><p class="text-gray-500 dark:text-gray-400">Loading...</p></div>';
+        container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
 
         console.log('Loading Quarantine...');
 
         const response = await authenticatedFetch('/api/quarantine');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
         console.log('Quarantine data:', data);
+        await rwStatusReady;
+        if (!quarantineTakeTurn(id)) return;
 
-        // Update counter display
-        const countEl = document.getElementById('quarantine-count');
-        if (countEl) {
-            countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
-        }
-
-        if (!data.data || data.data.length === 0) {
-            quarantineLastData = data;
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No quarantined messages</p>';
-            return;
-        }
-
+        lastDataCache.quarantine = data;
         renderQuarantineData(data);
     } catch (error) {
+        if (!quarantineTakeTurn(id)) return;
+        lastDataCache.quarantine = null;
         console.error('Failed to load quarantine:', error);
-        document.getElementById('quarantine-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load quarantine: ${escapeHtml(error.message)}</p>`;
-        const countEl = document.getElementById('quarantine-count');
-        if (countEl) countEl.textContent = '';
+        document.getElementById('quarantine-logs').innerHTML = `<p class="ui-empty ui-text-fail">Failed to load quarantine: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadQuarantine()')}</p>`;
     }
 }
 
-// Render quarantine without loading spinner (for smart refresh)
 function renderQuarantineData(data) {
+    keepCheckedRows('.quarantine-checkbox', () => drawQuarantineRows(data), quarantineUpdateSelection);
+}
+
+function drawQuarantineRows(data) {
     const container = document.getElementById('quarantine-logs');
     if (!container) return;
 
-    // Keep the latest payload so sort changes can re-render without a re-fetch
     quarantineLastData = data;
-
-    // Update counter display
+    const summary = document.getElementById('quarantine-summary');
     const countEl = document.getElementById('quarantine-count');
-    if (countEl) {
-        countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
+    if (countEl) countEl.textContent = uiCountLabel(data.total || (data.data || []).length, 'message', 'messages');
+    if (summary) {
+        const total = data.total || (data.data || []).length;
+        summary.textContent = total
+            ? `${total.toLocaleString()} ${total === 1 ? 'message' : 'messages'} held as likely spam. Releasing one delivers it to the recipient.`
+            : 'Nothing is held right now.';
     }
 
     if (!data.data || data.data.length === 0) {
-        container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No quarantined messages</p>';
+        container.innerHTML = '<p class="ui-empty">Messages that mailcow holds as likely spam show up here.</p>';
         return;
     }
 
-    const canAct = mailcowRwConfigured;
-    const items = sortQuarantineItems(data.data);
+    const mayAct = userCan('quarantine', 'write');
+    const canAct = mailcowRwConfigured && mayAct;
+    const items = data.data;
+
+    const lockedNote = canAct || !mayAct ? '' : `<div class="ui-list-note">${uiLocked('Quarantine actions are locked', `Release, delete, spam learning and the auto-rules ${UI_RW_KEY_TEXT}`)}</div>`;
+    const cols = canAct
+        ? '--ui-cols: 20px minmax(200px, 2fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 56px 64px 336px; --ui-table-min: 1080px'
+        : '--ui-cols: minmax(200px, 2fr) minmax(150px, 1.3fr) minmax(120px, 1fr) 56px 64px 76px; --ui-table-min: 760px';
 
     container.innerHTML = `
+        ${lockedNote}
+        <div class="ui-table ui-stack" data-sort-at="quarantine-list-summary" data-sort-name="quarantined messages" data-sort-default="Held:desc" style="${cols}">
         ${!canAct ? '' : `
-            <div class="mb-4 flex flex-wrap items-center gap-2">
-                <button onclick="quarantineSelectAll()" id="quarantine-select-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                    Select All
-                </button>
-                <button onclick="quarantineBulkRelease()" id="quarantine-bulk-release-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-green-500 bg-green-500 text-white hover:bg-green-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                    Release Selected
-                </button>
-                <button onclick="quarantineBulkDelete()" id="quarantine-bulk-delete-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    Delete Selected
-                </button>
-                <button onclick="quarantineBulkLearnHam()" id="quarantine-bulk-learnham-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-emerald-500 bg-emerald-500 text-white hover:bg-emerald-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-                    Not Spam
-                </button>
-                <button onclick="quarantineBulkLearnSpam()" id="quarantine-bulk-learnspam-btn"
-                    class="hidden px-3 py-1.5 text-xs font-medium rounded-md border border-orange-500 bg-orange-500 text-white hover:bg-orange-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-                    Learn Spam
-                </button>
-                <span id="quarantine-selection-count" class="hidden text-xs text-gray-500 dark:text-gray-400"></span>
-
-                <div class="flex-1"></div>
-
-                <button onclick="quarantineReleaseAll()" id="quarantine-release-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-green-500 bg-green-500 text-white hover:bg-green-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                    Release All
-                </button>
-                <button onclick="quarantineDeleteAll()" id="quarantine-delete-all-btn"
-                    class="px-3 py-1.5 text-xs font-medium rounded-md border border-red-500 bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center gap-1">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    Delete All
-                </button>
+            <div class="ui-toolbar ui-table-tools">
+                <button onclick="quarantineSelectAll()" id="quarantine-select-all-btn" class="ui-btn ui-btn-sm">Select All</button>
+                <button onclick="quarantineBulkRelease()" id="quarantine-bulk-release-btn" class="hidden ui-btn ui-btn-sm ui-btn-primary">Release Selected</button>
+                <button onclick="quarantineBulkDelete()" id="quarantine-bulk-delete-btn" class="hidden ui-btn ui-btn-sm ui-btn-danger-solid">Delete Selected</button>
+                <button onclick="quarantineBulkLearnHam()" id="quarantine-bulk-learnham-btn" class="hidden ui-btn ui-btn-sm ui-btn-primary">Not Spam</button>
+                <button onclick="quarantineBulkLearnSpam()" id="quarantine-bulk-learnspam-btn" class="hidden ui-btn ui-btn-sm ui-btn-primary">Learn Spam</button>
+                <span id="quarantine-selection-count" class="hidden ui-muted"></span>
+                <span class="ui-toolbar-gap"></span>
+                <button onclick="quarantineReleaseAll()" id="quarantine-release-all-btn" class="ui-btn ui-btn-sm ui-btn-primary">Release All</button>
+                <button onclick="quarantineDeleteAll()" id="quarantine-delete-all-btn" class="ui-btn ui-btn-sm ui-btn-danger-solid">Delete All</button>
             </div>
         `}
-        <div class="space-y-3">
+            <div class="ui-tr ui-tr-head">${canAct ? '<span></span>' : ''}<span data-sort-kind="text">Message</span><span data-sort-kind="text">For</span><span data-sort-kind="text">Why</span><span class="ui-td-end" data-sort-kind="number">Score</span><span data-sort-kind="date">Held</span><span class="ui-td-end">Actions</span></div>
             ${items.map(item => {
                 const itemId = item.id !== undefined ? item.id : '';
+                const idArg = escapeJsArg(String(itemId));
+                const hasScore = item.score !== undefined && item.score !== null;
                 return `
-                <div class="border border-red-200 dark:border-red-900/50 rounded-lg p-4 bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/30 transition" data-quarantine-id="${itemId}">
-                    <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-2 items-start">
-                        <div class="min-w-0 overflow-hidden flex items-start gap-3">
-                            ${canAct ? `
-                                <input type="checkbox" class="quarantine-checkbox mt-1 flex-shrink-0 w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500 dark:focus:ring-blue-600 dark:ring-offset-gray-800 dark:bg-gray-700 dark:border-gray-600 cursor-pointer"
-                                    value="${itemId}" onchange="quarantineUpdateSelection()" />
-                            ` : ''}
-                            <div class="min-w-0 overflow-hidden">
-                                <div class="flex flex-wrap items-center gap-2 mb-1">
-                                    <span class="text-sm font-medium text-gray-900 dark:text-white">${copyableText(item.sender || 'Unknown')}</span>
-                                    <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                    </svg>
-                                    <span class="text-sm text-gray-600 dark:text-gray-300">${copyableText(item.rcpt || 'Unknown')}</span>
-                                </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate cursor-pointer hover:text-blue-500 dark:hover:text-blue-400 transition-colors" dir="auto" title="Click to view details" onclick="showQuarantineDetails('${itemId}')">${escapeHtml(item.subject || 'No subject')}</p>
-                            </div>
-                        </div>
-                        <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
-                            <span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300">${item.action || 'Quarantined'}</span>
-                            ${item.virus_flag ? '<span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-purple-100 dark:bg-purple-900/30 text-purple-800 dark:text-purple-300">🦠 VIRUS</span>' : ''}
-                        </div>
+                <div class="ui-tr ui-q-row" data-quarantine-id="${escapeHtml(String(itemId))}" onclick="quarantineRowClick(event, '${idArg}')">
+                    ${canAct ? `<input type="checkbox" class="quarantine-checkbox ui-check" value="${escapeHtml(String(itemId))}" onchange="quarantineUpdateSelection()" aria-label="Select message" />` : ''}
+                    <div class="ui-td ui-q-who">
+                        <button type="button" class="ui-link-row" dir="auto" title="View details" onclick="showQuarantineDetails('${idArg}')">${escapeHtml(item.subject || 'No subject')}</button>
+                        <small>${item.sender ? uiEntity('address', item.sender, { plain: true }) : 'Unknown'}${item.qid ? `, ID ${escapeHtml(item.qid)}` : ''}</small>
                     </div>
-                    <div class="flex flex-col gap-2">
-                        <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-gray-600 dark:text-gray-400">
-                            <span>${formatTime(item.created)}</span>
-                            ${item.qid ? `<span class="font-mono" title="Queue ID">Q: ${copyableText(item.qid)}</span>` : ''}
-                            ${item.score !== undefined && item.score !== null ? `<span>Score: <span class="${item.score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${item.score.toFixed(1)}</span></span>` : ''}
-                        </div>
-                        <div class="flex flex-wrap gap-1">
-                            <button onclick="showQuarantineDetails('${itemId}')" title="View details"
-                                class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/30 transition-colors flex items-center justify-center gap-1">
-                                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
-                                Details
-                            </button>
-                            ${canAct ? `
-                                <button onclick="quarantineRelease('${itemId}')" title="Release message"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-green-300 dark:border-green-700 text-green-700 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 transition-colors flex items-center justify-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                                    Release
-                                </button>
-                                <button onclick="quarantineDelete('${itemId}')" title="Delete message"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-red-300 dark:border-red-700 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors flex items-center justify-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                                    Delete
-                                </button>
-                                <button onclick="quarantineLearnHam('${itemId}')" title="Release & train as Not Spam"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-emerald-300 dark:border-emerald-700 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/30 transition-colors flex items-center justify-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-                                    Not Spam
-                                </button>
-                                <button onclick="quarantineLearnSpam('${itemId}')" title="Delete & train as Spam"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-orange-300 dark:border-orange-700 text-orange-700 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/30 transition-colors flex items-center justify-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-                                    Spam
-                                </button>
-                                <button onclick="showAddRuleFromQuarantine('${escapeJsArg(item.sender || '')}', '${escapeJsArg(item.rcpt || '')}', '${escapeJsArg(item.subject || '')}')" title="Create auto-rule from this email"
-                                    class="quarantine-action-btn px-2 py-1 text-xs font-medium rounded-md border border-amber-300 dark:border-amber-700 text-amber-700 dark:text-amber-400 hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors flex items-center justify-center gap-1">
-                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-                                    Rule
-                                </button>
-                            ` : ''}
-                        </div>
-                    </div>
-                </div>
-            `;
+                    <span class="ui-td">${item.rcpt ? uiEntity('address', item.rcpt, { plain: true }) : 'Unknown'}</span>
+                    <span class="ui-td ui-td-wrap">${uiTag(item.action || 'Quarantined', quarantineActionTone(item.action))}${item.virus_flag ? ` ${uiTag('Virus', 'spam')}` : ''}</span>
+                    <span class="ui-td ui-td-end${hasScore && item.score >= 15 ? ' ui-text-fail' : ''}"${hasScore && isFinite(Number(item.score)) ? ` data-sort="${Number(item.score)}"` : ''}><small class="ui-sec-unit">Score </small>${hasScore ? item.score.toFixed(1) : '-'}</span>
+                    <time class="ui-td" title="${escapeHtml(formatTime(item.created))}"${isFinite(Date.parse(item.created)) ? ` data-sort="${Date.parse(item.created)}"` : ''}><small class="ui-sec-unit">Held </small>${formatAgo(item.created).replace(' ago', '')}</time>
+                    <span class="ui-td ui-td-end ui-row-actions">
+                        ${canAct ? `
+                            <button onclick="quarantineRelease('${idArg}')" title="Release message" class="quarantine-action-btn ui-btn ui-btn-sm">Release</button>
+                            <button onclick="quarantineLearnHam('${idArg}')" title="Release and train as not spam" class="quarantine-action-btn ui-btn ui-btn-sm">Not spam</button>
+                            <button onclick="quarantineLearnSpam('${idArg}')" title="Delete and train as spam" class="quarantine-action-btn ui-btn ui-btn-sm">Spam</button>
+                            <button onclick="showAddRuleFromQuarantine('${escapeJsArg(item.sender || '')}', '${escapeJsArg(item.rcpt || '')}', '${escapeJsArg(item.subject || '')}')" title="Create an auto-rule from this message" class="quarantine-action-btn ui-btn ui-btn-sm">Rule</button>
+                            <button onclick="quarantineDelete('${idArg}')" title="Delete message" class="quarantine-action-btn ui-btn ui-btn-sm ui-btn-danger">Delete</button>
+                        ` : `<button onclick="showQuarantineDetails('${idArg}')" title="View details" class="quarantine-action-btn ui-btn ui-btn-sm">Details</button>`}
+                    </span>
+                </div>`;
             }).join('')}
         </div>
     `;
 }
 
-// --- Quarantine action helpers ---
+function quarantineRowClick(event, itemId) {
+    if (event.target.closest('button, a, input, select, label, .copyable, .ui-ent, [role="menu"]') || uiRowHeld(event)) return;
+    showQuarantineDetails(itemId);
+}
 
 function quarantineUpdateSelection() {
     const checked = document.querySelectorAll('.quarantine-checkbox:checked');
     const bulkBtns = ['quarantine-bulk-release-btn', 'quarantine-bulk-delete-btn', 'quarantine-bulk-learnham-btn', 'quarantine-bulk-learnspam-btn'];
     const countLabel = document.getElementById('quarantine-selection-count');
+    const selectAll = document.getElementById('quarantine-select-all-btn');
+    const rows = document.querySelectorAll('.quarantine-checkbox').length;
+    if (selectAll) selectAll.textContent = rows && checked.length === rows ? 'Deselect All' : 'Select All';
 
+    ['quarantine-release-all-btn', 'quarantine-delete-all-btn'].forEach(id => { const el = document.getElementById(id); if (el) el.classList.toggle('hidden', checked.length > 0); });
     if (checked.length > 0) {
         bulkBtns.forEach(id => { const el = document.getElementById(id); if (el) { el.classList.remove('hidden'); el.classList.add('inline-flex'); } });
         if (countLabel) { countLabel.classList.remove('hidden'); countLabel.textContent = `${checked.length} selected`; }
@@ -2763,65 +4057,67 @@ async function quarantineRelease(itemId) {
 }
 
 async function quarantineDelete(itemId) {
-    if (!await showConfirmModal({ title: 'Delete Message', message: 'Are you sure you want to permanently delete this quarantined message?', confirmText: 'Delete', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Delete message', message: 'Delete this quarantined message permanently? This cannot be undone.', confirmText: 'Delete', isDangerous: true })) return;
     await quarantineAction('delete', [String(itemId)]);
 }
 
 async function quarantineLearnHam(itemId) {
-    if (!await showConfirmModal({ title: 'Not Spam', message: 'Release this message and train Rspamd that it is not spam?', confirmText: 'Not Spam' })) return;
+    if (!await showConfirmModal({ title: 'Not spam', message: 'Release this message and train Rspamd that it is not spam?', confirmText: 'Not spam' })) return;
     await quarantineAction('learnham', [String(itemId)]);
 }
 
 async function quarantineLearnSpam(itemId) {
-    if (!await showConfirmModal({ title: 'Mark as Spam', message: 'Delete this message and train Rspamd that it IS spam?', confirmText: 'Spam', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Mark as spam', message: 'Delete this message and train Rspamd that it is spam? This cannot be undone.', confirmText: 'Mark as spam', isDangerous: true })) return;
     await quarantineAction('learnspam', [String(itemId)]);
 }
 
 async function quarantineBulkRelease() {
     const ids = quarantineGetSelectedIds();
     if (ids.length === 0) return;
-    if (!await showConfirmModal({ title: 'Release Messages', message: `Release ${ids.length} quarantined message(s)?`, confirmText: 'Release' })) return;
+    if (!await showConfirmModal({ title: 'Release messages', message: `Release ${ids.length} quarantined message(s)?`, confirmText: 'Release' })) return;
     await quarantineAction('release', ids);
 }
 
 async function quarantineBulkDelete() {
     const ids = quarantineGetSelectedIds();
     if (ids.length === 0) return;
-    if (!await showConfirmModal({ title: 'Delete Messages', message: `Permanently delete ${ids.length} quarantined message(s)?`, confirmText: 'Delete', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Delete messages', message: `Permanently delete ${ids.length} quarantined message(s)? This cannot be undone.`, confirmText: 'Delete', isDangerous: true })) return;
     await quarantineAction('delete', ids);
 }
 
 async function quarantineBulkLearnHam() {
     const ids = quarantineGetSelectedIds();
     if (ids.length === 0) return;
-    if (!await showConfirmModal({ title: 'Not Spam', message: `Release ${ids.length} message(s) and train Rspamd as not spam?`, confirmText: 'Not Spam' })) return;
+    if (!await showConfirmModal({ title: 'Not spam', message: `Release ${ids.length} message(s) and train Rspamd as not spam?`, confirmText: 'Not spam' })) return;
     await quarantineAction('learnham', ids);
 }
 
 async function quarantineBulkLearnSpam() {
     const ids = quarantineGetSelectedIds();
     if (ids.length === 0) return;
-    if (!await showConfirmModal({ title: 'Mark as Spam', message: `Delete ${ids.length} message(s) and train Rspamd as spam?`, confirmText: 'Spam', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Mark as spam', message: `Delete ${ids.length} message(s) and train Rspamd as spam? This cannot be undone.`, confirmText: 'Mark as spam', isDangerous: true })) return;
     await quarantineAction('learnspam', ids);
 }
 
 async function quarantineReleaseAll() {
     const allIds = Array.from(document.querySelectorAll('.quarantine-checkbox')).map(cb => cb.value).filter(Boolean);
     if (allIds.length === 0) return;
-    if (!await showConfirmModal({ title: 'Release All', message: `Release ALL ${allIds.length} quarantined message(s)?`, confirmText: 'Release All' })) return;
+    if (!await showConfirmModal({ title: 'Release all', message: `Release ALL ${allIds.length} quarantined message(s)?`, confirmText: 'Release all' })) return;
     await quarantineAction('release', allIds);
 }
 
 async function quarantineDeleteAll() {
     const allIds = Array.from(document.querySelectorAll('.quarantine-checkbox')).map(cb => cb.value).filter(Boolean);
     if (allIds.length === 0) return;
-    if (!await showConfirmModal({ title: 'Delete All', message: `Permanently delete ALL ${allIds.length} quarantined message(s)? This cannot be undone.`, confirmText: 'Delete All', isDangerous: true })) return;
+    if (!await showConfirmModal({ title: 'Delete all', message: `Permanently delete ALL ${allIds.length} quarantined message(s)? This cannot be undone.`, confirmText: 'Delete all', isDangerous: true })) return;
     await quarantineAction('delete', allIds);
 }
 
 async function quarantineAction(action, itemIds) {
+    if (!uiMayAct('quarantine')) return;
     const allBtns = '.quarantine-action-btn, .quarantine-checkbox, #quarantine-bulk-release-btn, #quarantine-bulk-delete-btn, #quarantine-bulk-learnham-btn, #quarantine-bulk-learnspam-btn, #quarantine-select-all-btn, #quarantine-release-all-btn, #quarantine-delete-all-btn';
     document.querySelectorAll(allBtns).forEach(el => { el.disabled = true; el.style.opacity = '0.5'; });
+    quarantineActing++;
 
     try {
         const endpoints = {
@@ -2837,63 +4133,45 @@ async function quarantineAction(action, itemIds) {
             body: JSON.stringify({ items: itemIds })
         });
 
-        const result = await res.json();
+        const result = await uiReadJson(res);
         const actionLabels = { release: 'released', delete: 'deleted', learnham: 'released & marked as not spam', learnspam: 'deleted & marked as spam' };
-        if (res.ok && result.status === 'success') {
-            showToast(result.msg || `Message(s) ${actionLabels[action] || action} successfully`, 'success');
+        if (res.ok && result && result.status === 'success') {
+            showToast(mailcowWords(result.msg) || `Message(s) ${actionLabels[action] || action} successfully`, 'success');
             lastDataCache.quarantine = null;
             await loadQuarantine();
         } else {
-            showToast(`Failed to ${action} message(s): ` + (result.msg || result.detail || 'Unknown error'), 'error');
+            showToast(`Failed to ${action} message(s): ` + actionErrorText(res, result), 'error');
         }
     } catch (err) {
-        showToast(`Failed to ${action} message(s): ` + err.message, 'error');
+        showToast(`Failed to ${action} message(s): ` + uiErrorText(err), 'error');
     } finally {
+        quarantineActing--;
         document.querySelectorAll(allBtns).forEach(el => { el.disabled = false; el.style.opacity = ''; });
     }
 }
 
-// --- Quarantine Detail View ---
-
 async function showQuarantineDetails(itemId) {
-    // Create modal backdrop
     const existing = document.getElementById('quarantine-detail-modal');
     if (existing) existing.remove();
 
-    const modal = document.createElement('div');
-    modal.id = 'quarantine-detail-modal';
-    modal.className = 'fixed inset-0 z-[9999] flex items-center justify-center p-4';
-    modal.innerHTML = `
-        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" onclick="closeQuarantineDetails()"></div>
-        <div class="relative bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div class="flex items-center justify-between p-4 border-b border-gray-200 dark:border-gray-700">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Quarantine Item Details</h3>
-                <button onclick="closeQuarantineDetails()" class="p-1 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            <div class="flex-1 overflow-y-auto p-4" id="quarantine-detail-content">
-                <div class="flex items-center justify-center py-12">
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-                    <span class="ml-3 text-gray-500 dark:text-gray-400">Loading details...</span>
-                </div>
-            </div>
-            <div id="quarantine-detail-footer" class="hidden"></div>
-        </div>
-    `;
-    document.body.appendChild(modal);
+    uiDialog({
+        id: 'quarantine-detail-modal', title: 'Quarantine Item Details', size: 'wide',
+        close: closeQuarantineDetails, backdropClose: closeQuarantineDetails,
+        bodyId: 'quarantine-detail-content',
+        body: '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading details...</p></div>',
+        footId: 'quarantine-detail-footer', footHidden: true,
+    });
     document.body.style.overflow = 'hidden';
 
     try {
-        const res = await authenticatedFetch(`/api/quarantine/${itemId}/details`);
-        if (!res.ok) throw new Error('Failed to fetch details');
+        const res = await authenticatedFetch(`/api/quarantine/${encodeURIComponent(itemId)}/details`);
+        if (!res.ok) throw await responseError(res);
         const data = await res.json();
         renderQuarantineDetailContent(data, itemId);
     } catch (err) {
         document.getElementById('quarantine-detail-content').innerHTML = `
-            <div class="text-center py-12 text-red-500">
-                <p class="font-medium">Failed to load details</p>
-                <p class="text-sm mt-1">${escapeHtml(err.message)}</p>
+            <div class="ui-empty">
+                <p class="ui-text-fail">Could not load the details: ${escapeHtml(uiErrorText(err))}</p>
             </div>`;
     }
 }
@@ -2914,136 +4192,85 @@ function renderQuarantineDetailContent(data, itemId) {
     const zeroSymbols = allSymbols.filter(s => (s.score || 0) === 0).sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
     const recipientsHtml = (data.recipients || []).map(r =>
-        `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300">
-            <span class="font-medium uppercase text-[10px] ${r.type === 'smtp' ? 'text-blue-500' : 'text-gray-400'}">${escapeHtml(r.type)}</span>
-            ${copyableText(r.address)}
-        </span>`
+        `<span class="ui-qd-rcpt"><small class="${r.type === 'smtp' ? 'ui-text-info' : 'ui-muted'}">${escapeHtml(r.type)}</small> ${uiEntity('address', r.address)}</span>`
     ).join(' ');
 
-    const scoreColor = (data.score || 0) >= 15 ? 'text-red-600 dark:text-red-400' :
-                       (data.score || 0) >= 6 ? 'text-orange-500 dark:text-orange-400' :
-                       'text-green-600 dark:text-green-400';
+    const score = data.score || 0;
+    const scoreTone = score >= 15 ? 'fail' : score >= 6 ? 'warn' : 'ok';
 
     const buildSymbolRows = (syms) => syms.map(s => {
         const sc = s.score || 0;
-        const cls = sc > 0 ? 'text-red-600 dark:text-red-400 font-semibold' :
-                    sc < 0 ? 'text-green-600 dark:text-green-400 font-semibold' :
-                    'text-gray-400 dark:text-gray-500';
+        const tone = sc > 0 ? 'ui-text-fail' : sc < 0 ? 'ui-text-ok' : 'ui-muted';
         const opts = (s.options || []).join(', ');
-        return `<tr class="border-b border-gray-100 dark:border-gray-700/50 hover:bg-gray-50 dark:hover:bg-gray-700/30">
-            <td class="py-1.5 px-2 font-mono text-gray-800 dark:text-gray-200">${escapeHtml(s.name || '')}</td>
-            <td class="py-1.5 px-2 text-gray-500 dark:text-gray-400">${escapeHtml(s.group || '')}</td>
-            <td class="py-1.5 px-2 text-right ${cls}">${sc !== 0 ? (sc > 0 ? '+' : '') + sc.toFixed(2) : '0'}</td>
-            <td class="py-1.5 px-2 text-gray-400 dark:text-gray-500 max-w-xs truncate" title="${escapeHtml(opts)}">${escapeHtml(opts)}</td>
+        return `<tr>
+            <td class="ui-mono">${escapeHtml(s.name || '')}</td>
+            <td class="ui-muted">${escapeHtml(s.group || '')}</td>
+            <td class="ui-td-end ${tone}"><b>${sc !== 0 ? (sc > 0 ? '+' : '') + sc.toFixed(2) : '0'}</b></td>
+            <td class="ui-muted ui-qd-opts" title="${escapeHtml(opts)}">${escapeHtml(opts)}</td>
         </tr>`;
     }).join('');
 
-    const symbolTableHead = `<table class="w-full text-xs"><thead><tr class="border-b border-gray-200 dark:border-gray-700 text-left">
-        <th class="py-2 px-2 font-medium text-gray-500 dark:text-gray-400">Symbol</th>
-        <th class="py-2 px-2 font-medium text-gray-500 dark:text-gray-400">Group</th>
-        <th class="py-2 px-2 font-medium text-gray-500 dark:text-gray-400 text-right">Score</th>
-        <th class="py-2 px-2 font-medium text-gray-500 dark:text-gray-400">Details</th>
-    </tr></thead>`;
+    const symbolTable = rows => `<div class="ui-dtable-scroll"><table class="ui-dtable"><thead><tr>
+        <th>Symbol</th><th>Group</th><th class="ui-td-end">Score</th><th>Details</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>`;
 
-    const textContent = data.text_plain || data.text_html || '';
-    const canAct = mailcowRwConfigured;
+    const plainText = (data.text_plain || '').trim();
+    const textContent = (plainText && plainText !== '-') ? data.text_plain : (data.text_html || '');
+    const mayAct = userCan('quarantine', 'write');
+    const canAct = mailcowRwConfigured && mayAct;
 
     content.innerHTML = `
-        <div class="space-y-5">
-            <div class="space-y-3">
-                <div>
-                    <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Subject</label>
-                    <p class="text-sm font-medium text-gray-900 dark:text-white mt-0.5">${copyableText(data.subject || '-')}</p>
-                </div>
-                <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div>
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">From (Header)</label>
-                        <p class="text-sm text-gray-800 dark:text-gray-200 mt-0.5">${copyableText(data.header_from || '-')}</p>
-                    </div>
-                    <div>
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Envelope From</label>
-                        <p class="text-sm text-gray-800 dark:text-gray-200 mt-0.5 font-mono">${copyableText(data.env_from || '-')}</p>
-                    </div>
-                </div>
-                <div>
-                    <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Recipients</label>
-                    <div class="flex flex-wrap gap-1 mt-1">${recipientsHtml || '<span class="text-sm text-gray-500">-</span>'}</div>
-                </div>
-                <div class="flex items-center gap-4">
-                    <div>
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Score</label>
-                        <p class="text-lg font-bold ${scoreColor} mt-0.5">${(data.score || 0).toFixed(2)}</p>
-                    </div>
-                    <div>
-                        <label class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Action</label>
-                        <p class="mt-0.5"><span class="inline-block px-2 py-0.5 text-xs font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300">${escapeHtml(data.action || '-')}</span></p>
-                    </div>
-                </div>
+        <div class="ui-qd">
+            <div class="ui-md-ids ui-qd-facts">
+                <div class="ui-md-fact ui-qd-wide"><span>Subject</span><div dir="auto">${copyableText(data.subject || '-')}</div></div>
+                <div class="ui-md-fact"><span>From (Header)</span><div>${uiEntity('address', data.header_from || '-')}</div></div>
+                <div class="ui-md-fact"><span>Envelope From</span><div class="ui-mono">${uiEntity('address', data.env_from || '-', { mono: true })}</div></div>
+                <div class="ui-md-fact ui-qd-wide"><span>Recipients</span><div class="ui-chip-row">${recipientsHtml || '<span class="ui-muted">-</span>'}</div></div>
+                <div class="ui-md-fact"><span>Score</span><div class="ui-text-${scoreTone}"><b>${score.toFixed(2)}</b></div></div>
+                <div class="ui-md-fact"><span>Action</span><div>${uiTag(data.action || '-', quarantineActionTone(data.action))}</div></div>
             </div>
 
             <div>
-                <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
-                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"></path></svg>
-                    Rspamd Symbols
-                </h4>
-                ${activeSymbols.length > 0 ? `<div class="overflow-x-auto">${symbolTableHead}<tbody>${buildSymbolRows(activeSymbols)}</tbody></table></div>` : '<p class="text-gray-500 text-sm">No active symbols</p>'}
+                <h4 class="ui-md-h">Rspamd Symbols</h4>
+                ${activeSymbols.length > 0 ? symbolTable(buildSymbolRows(activeSymbols)) : '<p class="ui-muted">No active symbols</p>'}
                 ${zeroSymbols.length > 0 ? `
-                <details class="mt-2">
-                    <summary class="text-xs text-gray-500 dark:text-gray-400 cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none py-1">
-                        Informational symbols (score 0) - ${zeroSymbols.length} items
-                    </summary>
-                    <div class="overflow-x-auto mt-1">${symbolTableHead}<tbody>${buildSymbolRows(zeroSymbols)}</tbody></table></div>
+                <details class="ui-dns-more">
+                    <summary>Informational symbols (score 0) - ${zeroSymbols.length} items</summary>
+                    ${symbolTable(buildSymbolRows(zeroSymbols))}
                 </details>` : ''}
             </div>
 
             ${textContent ? `
             <div>
-                <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-2 flex items-center gap-2">
-                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"></path></svg>
-                    Email Content
-                </h4>
-                <pre class="text-xs bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-3 overflow-x-auto whitespace-pre-wrap max-h-64 overflow-y-auto text-gray-800 dark:text-gray-200">${escapeHtml(textContent)}</pre>
+                <h4 class="ui-md-h">Email Content</h4>
+                <pre class="ui-qd-text" dir="auto">${escapeHtml(textContent)}</pre>
             </div>` : ''}
 
             ${data.fuzzy_hashes && data.fuzzy_hashes.length > 0 ? `
             <div>
-                <h4 class="text-sm font-semibold text-gray-900 dark:text-white mb-2">Fuzzy Hashes</h4>
-                <div class="text-xs font-mono bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg p-3">${data.fuzzy_hashes.map(h => escapeHtml(JSON.stringify(h))).join('<br>')}</div>
+                <h4 class="ui-md-h">Fuzzy Hashes</h4>
+                <div class="ui-qd-text">${data.fuzzy_hashes.map(h => escapeHtml(JSON.stringify(h))).join('<br>')}</div>
             </div>` : ''}
         </div>
     `;
 
-    // Render sticky footer with action buttons
     if (footer && canAct) {
-        footer.className = 'grid grid-cols-4 gap-1.5 p-3 border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900/50';
+        footer.className = 'ui-dialog-foot';
         footer.innerHTML = `
-            <button onclick="closeQuarantineDetails(); quarantineRelease('${itemId}')"
-                class="py-2 text-xs font-medium rounded-md bg-green-500 text-white hover:bg-green-600 transition-colors flex items-center justify-center gap-1">
-                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg>
-                Release
-            </button>
-            <button onclick="closeQuarantineDetails(); quarantineDelete('${itemId}')"
-                class="py-2 text-xs font-medium rounded-md bg-red-500 text-white hover:bg-red-600 transition-colors flex items-center justify-center gap-1">
-                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                Delete
-            </button>
-            <button onclick="closeQuarantineDetails(); quarantineLearnHam('${itemId}')"
-                class="py-2 text-xs font-medium rounded-md bg-emerald-500 text-white hover:bg-emerald-600 transition-colors flex items-center justify-center gap-1">
-                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
-                Not Spam
-            </button>
-            <button onclick="closeQuarantineDetails(); quarantineLearnSpam('${itemId}')"
-                class="py-2 text-xs font-medium rounded-md bg-orange-500 text-white hover:bg-orange-600 transition-colors flex items-center justify-center gap-1">
-                <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"></path></svg>
-                Spam
-            </button>
+            <button onclick="closeQuarantineDetails(); quarantineLearnSpam('${escapeJsArg(itemId)}')" class="ui-btn" title="Delete & train as Spam">Spam</button>
+            <button onclick="closeQuarantineDetails(); quarantineLearnHam('${escapeJsArg(itemId)}')" class="ui-btn" title="Release & train as Not Spam">Not Spam</button>
+            <span class="ui-toolbar-gap"></span>
+            <button onclick="closeQuarantineDetails(); quarantineDelete('${escapeJsArg(itemId)}')" class="ui-btn ui-btn-danger">Delete</button>
+            <button onclick="closeQuarantineDetails(); quarantineRelease('${escapeJsArg(itemId)}')" class="ui-btn ui-btn-primary">Release</button>
         `;
+    } else if (footer && !mayAct) {
+        footer.className = 'hidden';
+        footer.innerHTML = '';
+    } else if (footer) {
+        footer.className = 'ui-dialog-foot ui-dialog-foot-note';
+        footer.innerHTML = uiLocked('Quarantine actions are locked', `Release, delete and spam learning ${UI_RW_KEY_TEXT}`);
     }
 }
-
-// =============================================================================
-// QUARANTINE AUTO-RULES
-// =============================================================================
 
 let _quarantineRulesCache = null;
 
@@ -3051,82 +4278,109 @@ async function initQuarantineRules() {
     const section = document.getElementById('quarantine-rules-section');
     if (!section) return;
     
-    // Ensure RW status is loaded (may not be ready on first page load)
     if (!mailcowRwConfigured) {
         await fetchRwStatus();
     }
     
-    if (mailcowRwConfigured) {
-        section.classList.remove('hidden');
+    if (showQuarantineRulesAccess()) {
         loadQuarantineRules();
     }
 }
 
-async function loadQuarantineRules() {
+function showPageTab(page, tab) {
+    Object.keys(TAB_FEATURES[page]).forEach(name => {
+        const btn = document.getElementById(`${page}-tab-btn-${name}`);
+        if (btn) { btn.classList.toggle('active', name === tab); btn.setAttribute('aria-selected', name === tab); }
+        const panel = document.getElementById(`${page}-tab-${name}`);
+        if (panel) panel.classList.toggle('hidden', name !== tab);
+    });
+}
+
+let quarantineTab = 'messages';
+function quarantineShowTab(tab) {
+    quarantineTab = tab;
+    routerSyncSubpage('quarantine', tab);
+    ['messages', 'rules'].forEach(name => {
+        const btn = document.getElementById(`quarantine-tab-btn-${name}`);
+        if (btn) { btn.classList.toggle('active', name === tab); btn.setAttribute('aria-selected', name === tab); }
+        const panel = document.getElementById(`quarantine-tab-${name}`);
+        if (panel) panel.classList.toggle('hidden', name !== tab);
+    });
+}
+
+let outboundTab = 'queue';
+function outboundShowTab(tab, load = true) {
+    const asked = tab;
+    tab = pageTabOn('outbound', tab);
+    outboundTab = tab;
+    routerSyncSubpage('outbound', tab, tab !== asked);
+    showPageTab('outbound', tab);
+    if (!load || currentTab !== 'outbound') return;
+    if (tab === 'suppressions') loadSuppressionsTab();
+    else if (!isFeatureDisabled('queue')) loadQueue();
+}
+
+function loadOutbound() {
+    applyTabFeatures('outbound');
+    const queueOn = !isFeatureDisabled('queue'), suppressionsOn = !isFeatureDisabled('suppressions');
+    const queueSummary = document.getElementById('queue-summary');
+    const suppressionSummary = document.getElementById('suppression-summary');
+    if (queueSummary && !queueOn) queueSummary.textContent = '';
+    if (suppressionSummary && !suppressionsOn) suppressionSummary.textContent = '';
+    if (queueOn) loadQueue();
+    outboundShowTab(outboundTab, false);
+    if (outboundTab === 'suppressions') loadSuppressionsTab();
+    else if (suppressionsOn) loadSuppressionStats();
+}
+
+async function loadQuarantineRules({ quiet = false } = {}) {
     const container = document.getElementById('quarantine-rules-list');
     if (!container) return;
     
     try {
-        const res = await authenticatedFetch('/api/quarantine/rules');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const res = await authenticatedFetch('/api/quarantine/rules', quiet ? { timeout: PAGE_REFRESH_TIMEOUT } : {});
+        if (!res.ok) throw await responseError(res);
         const data = await res.json();
         _quarantineRulesCache = data;
         
         const countEl = document.getElementById('quarantine-rules-count');
         const activeCount = data.data.filter(r => r.enabled).length;
-        if (countEl) countEl.textContent = activeCount > 0 ? `(${activeCount} active)` : '';
+        if (countEl) countEl.textContent = uiCountLabel(data.data.length, 'rule', 'rules');
+        const tabCount = document.getElementById('quarantine-tab-n-rules');
+        if (tabCount) { tabCount.textContent = activeCount || ''; tabCount.classList.toggle('hidden', !activeCount); }
         
         if (!data.data || data.data.length === 0) {
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-4 text-sm">No rules configured. Click "Add Rule" to create one.</p>';
+            uiReplaceKeepingFocus(container, '<p class="ui-empty">No rules configured. Click "Add Rule" to create one.</p>');
             return;
         }
         
-        container.innerHTML = data.data.map(rule => {
+        uiReplaceKeepingFocus(container, `<div class="ui-table ui-stack ui-qr-table">${data.data.map(rule => {
             const matchLabels = { sender: 'Sender', sender_domain: 'Sender Domain', recipient: 'Recipient', subject: 'Subject' };
-            const actionColor = rule.action === 'delete' ? 'red' : 'green';
             const actionLabel = rule.action === 'delete' ? 'Delete' : 'Release';
-            
+            const repair = quarantineRuleRepair(rule);
+
             return `
-            <div class="border ${rule.enabled ? 'border-gray-200 dark:border-gray-700' : 'border-gray-100 dark:border-gray-800 opacity-60'} rounded-lg p-3 bg-white dark:bg-gray-800 hover:border-gray-300 dark:hover:border-gray-600 transition">
-                <div class="flex items-center justify-between gap-3">
-                    <div class="flex-1 min-w-0">
-                        <div class="flex items-center gap-2 mb-1 flex-wrap">
-                            <span class="font-medium text-sm text-gray-900 dark:text-white" dir="auto">${escapeHtml(rule.name)}</span>
-                            <span class="px-2 py-0.5 text-xs rounded-full bg-${actionColor}-100 dark:bg-${actionColor}-900/30 text-${actionColor}-700 dark:text-${actionColor}-300">${actionLabel}</span>
-                            ${rule.is_regex ? '<span class="px-2 py-0.5 text-xs rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300">Regex</span>' : ''}
-                            ${!rule.enabled ? '<span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400">Disabled</span>' : ''}
-                        </div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400">
-                            <span class="font-medium">${matchLabels[rule.match_type] || rule.match_type}:</span> 
-                            <code class="bg-gray-100 dark:bg-gray-700 px-1 rounded" dir="auto">${escapeHtml(rule.match_value)}</code>
-                        </p>
-                        <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
-                            Hits: ${rule.hit_count}${rule.last_hit_at ? ' · Last: ' + formatTime(rule.last_hit_at) : ''}
-                            ${rule.notes ? ' · ' + escapeHtml(rule.notes) : ''}
-                        </p>
-                    </div>
-                    <div class="flex items-center gap-1 flex-shrink-0">
-                        <button onclick="toggleQuarantineRule(${rule.id})" title="${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}"
-                            class="px-2 py-1 text-xs rounded-md font-medium transition ${rule.enabled 
-                                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200 dark:hover:bg-green-900/50' 
-                                : 'bg-gray-100 dark:bg-gray-700 text-gray-500 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-gray-600'}">
-                            ${rule.enabled ? 'Enabled' : 'Disabled'}
-                        </button>
-                        <button onclick="showEditQuarantineRuleModal(${rule.id})" title="Edit"
-                            class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition text-gray-400 hover:text-blue-500">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-                        </button>
-                        <button onclick="deleteQuarantineRule(${rule.id}, '${escapeJsArg(rule.name)}')" title="Delete"
-                            class="p-1.5 rounded hover:bg-gray-100 dark:hover:bg-gray-700 transition text-gray-400 hover:text-red-500">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                        </button>
-                    </div>
+            <div class="ui-tr${rule.enabled ? '' : ' ui-row-off'}" data-key="rule-${Number(rule.id)}">
+                <div class="ui-td ui-q-who">
+                    <div><b dir="auto">${escapeHtml(rule.name)}</b> ${uiTag(actionLabel, rule.action === 'delete' ? 'fail' : 'ok')}
+                        ${rule.is_regex ? uiTag('Regex', 'info') : ''} ${!rule.enabled ? uiTag('Disabled', '') : ''} ${repair ? uiTag('Check', 'warn') : ''}</div>
+                    <small>${escapeHtml(matchLabels[rule.match_type] || rule.match_type)}: <code class="ui-mono" dir="auto">${escapeHtml(rule.match_value)}</code></small>
+                    ${repair ? '<small class="ui-text-warn">Looks for a backslash. An earlier version may have changed this rule when it was edited.</small>' : ''}
+                    <small>Hits: ${escapeHtml(String(rule.hit_count))}${rule.last_hit_at ? ' · Last: ' + formatTime(rule.last_hit_at) : ''}${rule.notes ? ' · ' + escapeHtml(rule.notes) : ''}</small>
                 </div>
+                <span class="ui-td ui-td-end ui-row-actions">
+                    ${repair ? `<button onclick="repairQuarantineRule(${Number(rule.id)})" title="${escapeHtml(`Look for "${repair.text}" instead`)}" class="ui-btn ui-btn-sm" data-acts="quarantine">Repair</button>` : ''}
+                    <button onclick="toggleQuarantineRuleOnce(${Number(rule.id)}, this)" title="${rule.enabled ? 'Click to disable this rule' : 'Click to enable this rule'}"
+                        class="ui-btn ui-btn-sm${rule.enabled ? ' ui-btn-on' : ''}" data-acts="quarantine">${rule.enabled ? 'Enabled' : 'Disabled'}</button>
+                    <button onclick="showEditQuarantineRuleModal(${Number(rule.id)})" title="Edit" class="ui-btn ui-btn-sm" data-acts="quarantine">Edit</button>
+                    <button onclick="deleteQuarantineRule(${Number(rule.id)}, '${escapeJsArg(rule.name)}')" title="Delete" class="ui-btn ui-btn-sm ui-btn-danger" data-acts="quarantine">Delete</button>
+                </span>
             </div>`;
-        }).join('');
+        }).join('')}</div>`);
     } catch (err) {
         console.error('Failed to load quarantine rules:', err);
-        container.innerHTML = `<p class="text-red-500 text-center py-4 text-sm">Failed to load rules: ${escapeHtml(err.message)}</p>`;
+        if (quiet && _quarantineRulesCache) return;
+        uiReplaceKeepingFocus(container, `<p class="ui-empty ui-text-fail">Failed to load rules: ${escapeHtml(uiSentence(uiErrorText(err)))}${uiRetryButton('loadQuarantineRules()')}</p>`);
     }
 }
 
@@ -3141,108 +4395,103 @@ function showEditQuarantineRuleModal(ruleId) {
 }
 
 function showAddRuleFromQuarantine(sender, recipient, subject) {
-    // Pre-fill with data from the quarantine email
     const senderDomain = sender.includes('@') ? sender.split('@').pop() : '';
     const prefill = { sender, recipient, subject, senderDomain };
     _showQuarantineRuleModal(null, prefill);
 }
 
+const QRULE_REGEX_SPECIAL = '.*+?^${}()|[]\\';
+function quarantineRuleMatchMode(rule) {
+    const value = rule.match_value || '';
+    if (!rule.is_regex) return { mode: 'exact', value };
+    let text = '';
+    for (let i = 0; i < value.length; i++) {
+        if (value[i] === '\\' && i + 1 < value.length && QRULE_REGEX_SPECIAL.includes(value[i + 1])) {
+            text += value[++i];
+        } else if (QRULE_REGEX_SPECIAL.includes(value[i])) {
+            return { mode: 'regex', value };
+        } else {
+            text += value[i];
+        }
+    }
+    return { mode: 'contains', value: text };
+}
+
+function quarantineRuleRepair(rule) {
+    const ruleMode = quarantineRuleMatchMode(rule);
+    if (ruleMode.mode !== 'contains' || !ruleMode.value.includes('\\')) return null;
+    const once = quarantineRuleMatchMode({ is_regex: true, match_value: ruleMode.value });
+    return once.mode === 'contains' ? { pattern: ruleMode.value, text: once.value } : null;
+}
+
 function _showQuarantineRuleModal(rule, prefill) {
     const isEdit = !!rule;
     const title = isEdit ? 'Edit Rule' : 'Add Quarantine Rule';
-    
-    // Determine default values: edit mode uses rule data, prefill uses quarantine data
+    const ruleMode = isEdit ? quarantineRuleMatchMode(rule) : { mode: 'exact', value: '' };
+
     const defaultName = isEdit ? escapeHtml(rule.name) : (prefill ? escapeHtml(`Rule for ${prefill.sender}`) : '');
     const defaultMatchType = isEdit ? rule.match_type : (prefill ? 'sender' : 'sender');
-    const defaultMatchValue = isEdit ? escapeHtml(rule.match_value) : (prefill ? escapeHtml(prefill.sender) : '');
+    const defaultMatchValue = isEdit ? escapeHtml(ruleMode.value) : (prefill ? escapeHtml(prefill.sender) : '');
     const defaultAction = isEdit ? rule.action : 'release';
-    const defaultIsRegex = isEdit ? rule.is_regex : false;
     const defaultNotes = isEdit && rule.notes ? escapeHtml(rule.notes) : '';
     
-    // For pre-fill mode, provide quick-fill buttons for sender/domain/recipient
     const prefillButtons = prefill ? `
-        <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3 mb-4">
-            <p class="text-xs font-medium text-blue-700 dark:text-blue-300 mb-2">Quick fill from email:</p>
-            <div class="flex flex-wrap gap-1.5">
-                <button type="button" onclick="qrulePrefill('sender', '${escapeJsArg(prefill.sender)}')"
-                    class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-700 transition">Sender: ${escapeHtml(prefill.sender)}</button>
-                ${prefill.senderDomain ? `<button type="button" onclick="qrulePrefill('sender_domain', '${escapeJsArg(prefill.senderDomain)}')"
-                    class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-700 transition">Domain: ${escapeHtml(prefill.senderDomain)}</button>` : ''}
-                <button type="button" onclick="qrulePrefill('recipient', '${escapeJsArg(prefill.recipient)}')"
-                    class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-700 transition">Recipient: ${escapeHtml(prefill.recipient)}</button>
+        <div class="ui-qr-prefill">
+            <span class="ui-label">Quick fill from email:</span>
+            <div class="ui-chip-row">
+                <button type="button" onclick="qrulePrefill('sender', '${escapeJsArg(prefill.sender)}')" class="ui-chip">Sender: ${escapeHtml(prefill.sender)}</button>
+                ${prefill.senderDomain ? `<button type="button" onclick="qrulePrefill('sender_domain', '${escapeJsArg(prefill.senderDomain)}')" class="ui-chip">Domain: ${escapeHtml(prefill.senderDomain)}</button>` : ''}
+                <button type="button" onclick="qrulePrefill('recipient', '${escapeJsArg(prefill.recipient)}')" class="ui-chip">Recipient: ${escapeHtml(prefill.recipient)}</button>
             </div>
         </div>
     ` : '';
-    
-    const html = `
-    <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" id="quarantine-rule-modal-overlay">
-        <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-            <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${title}</h3>
-                <button onclick="closeQuarantineRuleModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
-            </div>
-            <div class="p-6 space-y-4">
+
+    const body = `
                 ${prefillButtons}
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Rule Name</label>
-                    <input type="text" id="qrule-name" value="${defaultName}" 
-                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" placeholder="e.g., Allow notifications from service X">
-                </div>
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Match Type</label>
-                        <select id="qrule-match-type" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                <label><span class="ui-label">Rule Name <span class="ui-text-fail">*</span></span>
+                    <input type="text" id="qrule-name" value="${defaultName}" class="ui-input" placeholder="e.g., Allow notifications from service X">
+                </label>
+                <div class="ui-qr-pair">
+                    <label><span class="ui-label">Match Type</span>
+                        <select id="qrule-match-type" class="ui-select">
                             <option value="sender" ${defaultMatchType === 'sender' ? 'selected' : ''}>Sender</option>
                             <option value="sender_domain" ${defaultMatchType === 'sender_domain' ? 'selected' : ''}>Sender Domain</option>
                             <option value="recipient" ${defaultMatchType === 'recipient' ? 'selected' : ''}>Recipient</option>
                             <option value="subject" ${defaultMatchType === 'subject' ? 'selected' : ''}>Subject</option>
                         </select>
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Action</label>
-                        <select id="qrule-action" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                            <option value="release" ${defaultAction === 'release' ? 'selected' : ''}>✅ Release</option>
-                            <option value="delete" ${defaultAction === 'delete' ? 'selected' : ''}>🗑️ Delete</option>
+                    </label>
+                    <label><span class="ui-label">Action</span>
+                        <select id="qrule-action" class="ui-select">
+                            <option value="release" ${defaultAction === 'release' ? 'selected' : ''}>Release</option>
+                            <option value="delete" ${defaultAction === 'delete' ? 'selected' : ''}>Delete</option>
                         </select>
-                    </div>
+                    </label>
                 </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Match Value</label>
-                    <input type="text" id="qrule-match-value" value="${defaultMatchValue}"
-                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg font-mono" placeholder="e.g., noreply@example.com">
-                    <div class="mt-2">
-                        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Match Mode</label>
-                        <select id="qrule-match-mode" onchange="updateQRuleMatchHelp()" class="w-full px-3 py-1.5 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                            <option value="exact" ${!defaultIsRegex ? 'selected' : ''}>Exact Match - matches the full value exactly</option>
-                            <option value="contains" ${defaultIsRegex && !(isEdit && rule.match_value.startsWith('^')) ? 'selected' : ''}>Contains - matches if value appears anywhere</option>
-                            <option value="regex" ${defaultIsRegex && isEdit && rule.match_value.startsWith('^') ? 'selected' : ''}>Regex (advanced) - custom regular expression</option>
-                        </select>
-                        <p id="qrule-match-help" class="text-xs text-gray-400 dark:text-gray-500 mt-1"></p>
-                    </div>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes (optional)</label>
-                    <textarea id="qrule-notes" rows="2" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" placeholder="Why this rule exists...">${defaultNotes}</textarea>
-                </div>
-                <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3">
-                    <p class="text-xs text-amber-700 dark:text-amber-300">
-                        <strong>Priority:</strong> Delete rules always take priority over Release rules. If both match, the email will be deleted.
-                    </p>
-                </div>
-            </div>
-            <div class="px-6 py-4 border-t border-gray-200 dark:border-gray-700 flex justify-end gap-2">
-                <button onclick="closeQuarantineRuleModal()" class="px-4 py-2 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition">Cancel</button>
-                <button onclick="saveQuarantineRule(${isEdit ? rule.id : 'null'})" class="px-4 py-2 text-sm font-medium rounded-lg bg-amber-500 hover:bg-amber-600 text-white transition">
-                    ${isEdit ? 'Save Changes' : 'Create Rule'}
-                </button>
-            </div>
-        </div>
-    </div>`;
-    
-    document.body.insertAdjacentHTML('beforeend', html); // nosemgrep: typescript.react.security.audit.react-unsanitized-method.react-unsanitized-method
+                <label><span class="ui-label">Match Value <span class="ui-text-fail">*</span></span>
+                    <input type="text" id="qrule-match-value" value="${defaultMatchValue}" class="ui-input ui-mono" placeholder="e.g., noreply@example.com">
+                </label>
+                <label><span class="ui-label">Match Mode</span>
+                    <select id="qrule-match-mode" onchange="updateQRuleMatchHelp()" class="ui-select">
+                        <option value="exact" ${ruleMode.mode === 'exact' ? 'selected' : ''}>Exact Match - matches the full value exactly</option>
+                        <option value="contains" ${ruleMode.mode === 'contains' ? 'selected' : ''}>Contains - matches if value appears anywhere</option>
+                        <option value="regex" ${ruleMode.mode === 'regex' ? 'selected' : ''}>Regex (advanced) - custom regular expression</option>
+                    </select>
+                    <small id="qrule-match-help" class="ui-muted"></small>
+                </label>
+                <label><span class="ui-label">Notes (optional)</span>
+                    <textarea id="qrule-notes" rows="2" class="ui-textarea" placeholder="Why this rule exists...">${defaultNotes}</textarea>
+                </label>
+                <div class="ui-alert ui-alert-warn ui-qr-note">
+                    <div class="ui-alert-text"><p><b>Priority:</b> Delete rules always take priority over Release rules. If both match, the email will be deleted.</p></div>
+                </div>`;
+
+    uiDialog({
+        id: 'quarantine-rule-modal-overlay', title, size: 'sm', close: closeQuarantineRuleModal, bodyClass: 'ui-form', body,
+        foot: `<button onclick="closeQuarantineRuleModal()" class="ui-btn">Cancel</button>
+            <button onclick="saveQuarantineRuleOnce(${isEdit ? Number(rule.id) : 'null'}, this)" class="ui-btn ui-btn-primary">${isEdit ? 'Save Changes' : 'Create Rule'}</button>`,
+    });
     updateQRuleMatchHelp();
+    uiGuardDialog(document.getElementById('quarantine-rule-modal-overlay'));
 }
 
 function qrulePrefill(matchType, value) {
@@ -3251,7 +4500,6 @@ function qrulePrefill(matchType, value) {
     const nameEl = document.getElementById('qrule-name');
     if (typeEl) typeEl.value = matchType;
     if (valueEl) valueEl.value = value;
-    // Update rule name if it's still auto-generated
     if (nameEl && nameEl.value.startsWith('Rule for ')) {
         const labels = { sender: 'Sender', sender_domain: 'Domain', recipient: 'Recipient' };
         nameEl.value = `${labels[matchType] || matchType}: ${value}`;
@@ -3270,11 +4518,18 @@ function updateQRuleMatchHelp() {
     helpEl.textContent = hints[mode] || '';
 }
 
-function closeQuarantineRuleModal() {
+function closeQuarantineRuleModal(saved = false) {
     const overlay = document.getElementById('quarantine-rule-modal-overlay');
-    if (overlay) overlay.remove();
+    if (!overlay) return;
+    if (saved) {
+        uiDialogSaved(overlay);
+        overlay.remove();
+    } else uiCloseGuarded(overlay, () => overlay.remove());
 }
 
+function saveQuarantineRuleOnce(ruleId, button) {
+    return uiOnce(button || 'quarantine-rule', () => saveQuarantineRule(ruleId), button, ruleId === null ? 'Creating...' : 'Saving...');
+}
 async function saveQuarantineRule(ruleId) {
     const name = document.getElementById('qrule-name')?.value?.trim();
     const matchType = document.getElementById('qrule-match-type')?.value;
@@ -3283,13 +4538,11 @@ async function saveQuarantineRule(ruleId) {
     const action = document.getElementById('qrule-action')?.value;
     const notes = document.getElementById('qrule-notes')?.value?.trim() || null;
     
-    if (!name) { showToast('Rule name is required', 'error'); return; }
-    if (!matchValue) { showToast('Match value is required', 'error'); return; }
+    if (!name) { uiFieldProblem(document.getElementById('qrule-name'), 'Enter a name for the rule.'); return; }
+    if (!matchValue) { uiFieldProblem(document.getElementById('qrule-match-value'), 'Enter the value to match.'); return; }
     
-    // Convert match mode to is_regex + match_value
     let isRegex = false;
     if (matchMode === 'contains') {
-        // Auto-wrap in regex for "contains" mode (escape special chars)
         const escaped = matchValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         matchValue = escaped;
         isRegex = true;
@@ -3298,7 +4551,11 @@ async function saveQuarantineRule(ruleId) {
     }
     
     const body = { name, match_type: matchType, match_value: matchValue, is_regex: isRegex, action, notes };
-    
+    await _submitQuarantineRule(ruleId, body);
+}
+
+async function _submitQuarantineRule(ruleId, body, doneMessage) {
+    if (!uiMayAct('quarantine')) return;
     try {
         const isEdit = ruleId !== null;
         const url = isEdit ? `/api/quarantine/rules/${ruleId}` : '/api/quarantine/rules';
@@ -3310,51 +4567,67 @@ async function saveQuarantineRule(ruleId) {
             body: JSON.stringify(body)
         });
         
-        if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(err.detail || `HTTP ${res.status}`);
-        }
+        if (!res.ok) throw await responseError(res);
         
-        closeQuarantineRuleModal();
-        showToast(isEdit ? 'Rule updated' : 'Rule created', 'success');
+        closeQuarantineRuleModal(true);
+        showToast(doneMessage || (isEdit ? 'Rule updated' : 'Rule created'), 'success');
         await loadQuarantineRules();
     } catch (err) {
-        showToast('Failed to save rule: ' + err.message, 'error');
+        showToast('Failed to save rule: ' + uiErrorText(err), 'error');
     }
 }
 
+async function repairQuarantineRule(ruleId) {
+    const rule = _quarantineRulesCache?.data?.find(r => r.id === ruleId);
+    const repair = rule && quarantineRuleRepair(rule);
+    if (!repair) { showToast('Rule not found', 'error'); return; }
+    await _submitQuarantineRule(ruleId, {
+        name: rule.name, match_type: rule.match_type, match_value: repair.pattern,
+        is_regex: true, action: rule.action, notes: rule.notes || null,
+    }, 'Rule repaired');
+}
+
 async function deleteQuarantineRule(ruleId, ruleName) {
-    if (!await showConfirmModal({ title: 'Delete Rule', message: `Delete rule "${ruleName}"?`, confirmText: 'Delete', isDangerous: true })) return;
+    if (!uiMayAct('quarantine')) return;
+    if (!await showConfirmModal({ title: 'Delete rule', message: `Delete rule "${ruleName}"? This cannot be undone.`, confirmText: 'Delete', isDangerous: true })) return;
     
     try {
         const res = await authenticatedFetch(`/api/quarantine/rules/${ruleId}`, { method: 'DELETE' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         
         showToast('Rule deleted', 'success');
         await loadQuarantineRules();
     } catch (err) {
-        showToast('Failed to delete rule: ' + err.message, 'error');
+        showToast('Failed to delete rule: ' + uiErrorText(err), 'error');
     }
 }
 
+function toggleQuarantineRuleOnce(ruleId, button) {
+    return uiOnce(`quarantine-rule-toggle:${ruleId}`, () => toggleQuarantineRule(ruleId), button);
+}
 async function toggleQuarantineRule(ruleId) {
+    if (!uiMayAct('quarantine')) return;
     try {
         const res = await authenticatedFetch(`/api/quarantine/rules/${ruleId}/toggle`, { method: 'POST' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         
         const rule = await res.json();
         showToast(`Rule ${rule.enabled ? 'enabled' : 'disabled'}`, 'success');
         await loadQuarantineRules();
     } catch (err) {
-        showToast('Failed to toggle rule: ' + err.message, 'error');
+        showToast('Failed to toggle rule: ' + uiErrorText(err), 'error');
     }
 }
 
+function testQuarantineRulesOnce(button) {
+    return uiOnce('quarantine-rules-test', testQuarantineRules, button, 'Testing...');
+}
 async function testQuarantineRules() {
+    const opener = layerLastAction || document.activeElement;
     try {
         showToast('Testing rules against quarantine...', 'info');
         const res = await authenticatedFetch('/api/quarantine/rules/test', { method: 'POST' });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!res.ok) throw await responseError(res);
         
         const data = await res.json();
         
@@ -3363,7 +4636,6 @@ async function testQuarantineRules() {
             return;
         }
         
-        // Group matches by rule
         const byRule = {};
         for (const m of data.matches) {
             const key = m.rule_id;
@@ -3374,60 +4646,45 @@ async function testQuarantineRules() {
         }
         
         const groupsHtml = Object.values(byRule).map(group => {
-            const actionColor = group.action === 'delete' ? 'red' : 'green';
+            const tone = group.action === 'delete' ? 'fail' : 'ok';
             const itemsHtml = group.items.map(m => `
-                <div class="py-1.5 pl-3 border-l-2 ${group.rule_enabled ? 'border-' + actionColor + '-300 dark:border-' + actionColor + '-700' : 'border-gray-300 dark:border-gray-600'}">
-                    <div class="text-xs text-gray-700 dark:text-gray-300">${escapeHtml(m.sender || '?')} → ${escapeHtml(m.recipient || '?')}</div>
-                    <div class="text-xs text-gray-400 dark:text-gray-500 truncate" dir="auto" title="${escapeHtml(m.subject || '')}">${escapeHtml((m.subject || 'No subject').substring(0, 80))}</div>
+                <div class="ui-qt-item${group.rule_enabled ? ` ui-qt-${tone}` : ''}">
+                    <div>${uiEntity('address', m.sender || '?', { plain: true })} → ${uiEntity('address', m.recipient || '?', { plain: true })}</div>
+                    <small class="ui-muted" dir="auto" title="${escapeHtml(m.subject || '')}">${escapeHtml((m.subject || 'No subject').substring(0, 80))}</small>
                 </div>
             `).join('');
-            
+
             return `
-            <div class="mb-4 ${!group.rule_enabled ? 'opacity-50' : ''}">
-                <div class="flex items-center gap-2 mb-1.5 flex-wrap">
-                    <span class="font-medium text-sm text-gray-900 dark:text-white" dir="auto">${escapeHtml(group.rule_name)}</span>
-                    <span class="px-1.5 py-0.5 text-xs rounded bg-${actionColor}-100 dark:bg-${actionColor}-900/30 text-${actionColor}-700 dark:text-${actionColor}-300">${group.action}</span>
-                    ${!group.rule_enabled ? '<span class="px-1.5 py-0.5 text-xs rounded bg-gray-200 dark:bg-gray-700 text-gray-500 dark:text-gray-400">Disabled - will not execute</span>' : ''}
-                    <span class="text-xs text-gray-400 ml-auto">${group.items.length} match${group.items.length !== 1 ? 'es' : ''}</span>
+            <div class="ui-qt-group${!group.rule_enabled ? ' ui-row-off' : ''}">
+                <div class="ui-list-head">
+                    <b dir="auto">${escapeHtml(group.rule_name)}</b> ${uiTag(group.action, tone)}
+                    ${!group.rule_enabled ? uiTag('Disabled - will not execute', '') : ''}
+                    <span class="ui-muted ui-head-actions">${group.items.length} match${group.items.length !== 1 ? 'es' : ''}</span>
                 </div>
-                <div class="space-y-1">${itemsHtml}</div>
+                <div class="ui-qt-items">${itemsHtml}</div>
             </div>`;
         }).join('');
-        
+
         const disabledCount = data.matches.filter(m => !m.rule_enabled).length;
         const activeCount = data.matches.length - disabledCount;
         const noMatches = data.total_matches === 0;
-        
-        const html = `
-        <div class="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4" id="qrule-test-modal">
-            <div class="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto">
-                <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Test Results</h3>
-                    <button onclick="document.getElementById('qrule-test-modal').remove()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                    </button>
-                </div>
-                <div class="p-6">
-                    <div class="flex items-center gap-3 mb-4 pb-3 border-b border-gray-100 dark:border-gray-700">
-                        <div class="text-center">
-                            <div class="text-2xl font-bold text-gray-900 dark:text-white">${data.total_matches}</div>
-                            <div class="text-xs text-gray-500">matched</div>
-                        </div>
-                        <div class="text-center text-gray-300 dark:text-gray-600">/</div>
-                        <div class="text-center">
-                            <div class="text-2xl font-bold text-gray-400">${data.total_quarantine}</div>
-                            <div class="text-xs text-gray-500">total</div>
-                        </div>
-                        ${disabledCount > 0 ? `<div class="ml-auto text-xs text-amber-600 dark:text-amber-400">⚠ ${disabledCount} from disabled rules</div>` : ''}
+
+        document.getElementById('qrule-test-modal')?.remove();
+        uiLayerOpener(opener);
+        const closeTest = () => document.getElementById('qrule-test-modal')?.remove();
+        uiDialog({
+            id: 'qrule-test-modal', title: 'Test Results', size: 'sm', close: closeTest, backdropClose: closeTest, bodyClass: 'ui-form',
+            body: `
+                    <div class="ui-kpis">
+                        <div class="ui-kpi"><b>${escapeHtml(String(data.total_matches))}</b>matched</div>
+                        <div class="ui-kpi"><b class="ui-muted">${escapeHtml(String(data.total_quarantine))}</b>total</div>
                     </div>
-                    ${noMatches ? '<p class="text-sm text-gray-500 text-center py-4">No quarantine items matched any rules.</p>' : groupsHtml}
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-4 pt-3 border-t border-gray-100 dark:border-gray-700 text-center">This is a dry-run preview. No actions were taken.</p>
-                </div>
-            </div>
-        </div>`;
-        document.body.insertAdjacentHTML('beforeend', html);
+                    ${disabledCount > 0 ? `<p class="ui-text-warn">${disabledCount} from disabled rules</p>` : ''}
+                    ${noMatches ? '<p class="ui-empty">No quarantine items matched any rules.</p>' : groupsHtml}
+                    <p class="ui-kv-note ui-list-foot">This is a dry-run preview. No actions were taken.</p>`,
+        });
     } catch (err) {
-        showToast('Test failed: ' + err.message, 'error');
+        showToast('Test failed: ' + uiErrorText(err), 'error');
     }
 }
 
@@ -3443,42 +4700,42 @@ function toggleQuarantineRuleHistory() {
     }
 }
 
-async function loadQuarantineRuleHistory() {
+async function loadQuarantineRuleHistory({ quiet = false } = {}) {
     const container = document.getElementById('quarantine-rules-history-list');
     if (!container) return;
     
-    container.innerHTML = '<p class="text-gray-400 text-xs text-center py-2">Loading...</p>';
-    
+    if (!quiet) uiReplaceKeepingFocus(container, '<p class="ui-empty">Loading...</p>');
+
     try {
-        const res = await authenticatedFetch('/api/quarantine/rules/logs?limit=20');
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const res = await authenticatedFetch('/api/quarantine/rules/logs?limit=20', quiet ? { timeout: PAGE_REFRESH_TIMEOUT } : {});
+        if (!res.ok) throw await responseError(res);
         const data = await res.json();
-        
+
         if (!data.data || data.data.length === 0) {
-            container.innerHTML = '<p class="text-gray-400 text-xs text-center py-2">No actions recorded yet</p>';
+            uiReplaceKeepingFocus(container, '<p class="ui-empty">No actions recorded yet</p>');
             return;
         }
-        
-        container.innerHTML = data.data.map(log => `
-            <div class="flex items-center gap-2 py-1.5 border-b border-gray-100 dark:border-gray-700/50 text-xs">
-                <span class="px-1.5 py-0.5 rounded ${log.action === 'delete' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400'}">${log.action}</span>
-                <span class="text-gray-500 dark:text-gray-400 flex-1 truncate" title="${escapeHtml(log.sender || '')} → ${escapeHtml(log.recipient || '')}">
-                    ${escapeHtml(log.sender || '?')} → ${escapeHtml(log.recipient || '?')}
-                </span>
-                <span class="text-gray-400 dark:text-gray-500 flex-shrink-0" title="Rule: ${escapeHtml(log.rule_name || '')}">${formatTime(log.created_at)}</span>
+
+        uiReplaceKeepingFocus(container, `<div class="ui-qt-history">${data.data.map(log => `
+            <div class="ui-qt-hrow">
+                ${uiTag(log.action, log.action === 'delete' ? 'fail' : 'ok')}
+                <span class="ui-q-who" title="${escapeHtml(log.sender || '')} → ${escapeHtml(log.recipient || '')}">${uiEntity('address', log.sender || '?', { plain: true })} → ${uiEntity('address', log.recipient || '?', { plain: true })}</span>
+                ${uiTime(log.created_at, formatTime(log.created_at), { title: `Rule: ${log.rule_name || ''}`, cls: 'ui-muted' })}
             </div>
-        `).join('');
+        `).join('')}</div>`);
     } catch (err) {
-        container.innerHTML = `<p class="text-red-500 text-xs text-center py-2">Failed: ${escapeHtml(err.message)}</p>`;
+        if (quiet) return;
+        uiReplaceKeepingFocus(container, `<p class="ui-empty ui-text-fail">Failed: ${escapeHtml(uiErrorText(err))}</p>`);
     }
 }
 
-// =============================================================================
-// MESSAGES TAB (UNIFIED VIEW)
-// =============================================================================
-
 function applyMessagesFilters() {
-    currentFilters.messages = {
+    readMessagesFilters();
+    loadMessages();
+}
+
+function readMessagesFilters() {
+    currentFilters.messages = messagesWithExact({
         search: document.getElementById('messages-filter-search').value,
         sender: document.getElementById('messages-filter-sender').value,
         recipient: document.getElementById('messages-filter-recipient').value,
@@ -3489,9 +4746,46 @@ function applyMessagesFilters() {
         date_range: document.getElementById('messages-date-range').value,
         start_date: document.getElementById('messages-start-date').value,
         end_date: document.getElementById('messages-end-date').value
-    };
+    });
+    if (messagesNoId) {
+        const kept = currentFilters.messages;
+        currentFilters.messages = Object.fromEntries(['search', 'date_range', 'start_date', 'end_date']
+            .filter(key => kept[key]).map(key => [key, kept[key]]));
+    }
     currentPage.messages = 1;
-    loadMessages();
+}
+
+function toggleMessagesFilters(open) {
+    const panel = document.getElementById('messages-more-filters');
+    const btn = document.getElementById('messages-filters-btn');
+    if (!panel) return;
+    const show = typeof open === 'boolean' ? open : panel.classList.contains('hidden');
+    panel.classList.toggle('hidden', !show);
+    if (btn) btn.setAttribute('aria-expanded', show);
+    if (show) { const first = panel.querySelector('input'); if (first) first.focus(); }
+}
+
+const MESSAGES_MORE_FILTERS = ['sender', 'recipient', 'user', 'ip', 'address', 'domain'];
+function messagesFiltersOn(f = currentFilters.messages || {}) {
+    return !!(MESSAGES_MORE_FILTERS.some(k => f[k]) || f.search || f.status || f.direction || f.start_date || f.end_date || f.date_range);
+}
+
+function updateMessagesFilterState() {
+    const f = currentFilters.messages || {};
+    const advanced = MESSAGES_MORE_FILTERS.filter(k => f[k]).length;
+    const any = messagesFiltersOn(f);
+    const badge = document.getElementById('messages-filters-n');
+    if (badge) { badge.textContent = advanced || ''; badge.classList.toggle('hidden', !advanced); }
+    const button = document.getElementById('messages-filters-btn');
+    if (button) button.setAttribute('aria-label', advanced ? `Filters, ${advanced} in use` : 'Filters');
+    const clear = document.getElementById('messages-clear-filters');
+    if (clear) clear.classList.toggle('hidden', !any);
+    const chips = document.getElementById('messages-exact');
+    if (chips) {
+        const parts = messagesExact ? messagesExactParts(messagesExact) : [];
+        chips.innerHTML = parts.length ? `<span class="ui-sec-filter" title="Matched whole, not as a part of a longer value"><span>${parts.map(([label, value]) =>
+            `${escapeHtml(label)} <bdi>${escapeHtml(value)}</bdi>`).join(', ')}</span><button type="button" onclick="clearMessagesExact()" aria-label="Remove this filter" title="Remove this filter">&times;</button></span>` : '';
+    }
 }
 
 function clearMessagesFilters() {
@@ -3502,29 +4796,50 @@ function clearMessagesFilters() {
     document.getElementById('messages-filter-user').value = '';
     document.getElementById('messages-filter-status').value = '';
     document.getElementById('messages-filter-ip').value = '';
-    // Reset date range
     document.getElementById('messages-date-range').value = '';
     document.getElementById('messages-start-date').value = '';
     document.getElementById('messages-end-date').value = '';
     document.getElementById('messages-date-range-start').value = '';
     document.getElementById('messages-date-range-end').value = '';
     document.getElementById('messages-date-range-label').textContent = 'All Time';
-    // Reset preset button styles
-    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
-        if (btn.getAttribute('data-preset') === '') {
-            btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors';
-        } else {
-            btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-        }
-    });
-    currentFilters.messages = {};
+    setMessagesDatePresetActive('');
+    setMessagesFilters({});
     currentPage.messages = 1;
     loadMessages();
 }
 
-// =============================================================================
-// MESSAGES DATE RANGE PICKER
-// =============================================================================
+function setMessagesDatePresetActive(preset) {
+    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
+        btn.setAttribute('aria-pressed', String(preset !== null && btn.getAttribute('data-preset') === preset));
+    });
+}
+
+const MESSAGES_PICKERS = ['status', 'direction', 'time'];
+
+function toggleMessagesPicker(kind, open) {
+    if (kind && open !== false) {
+        uiPickerOpen(`messages-${kind}`);
+        return;
+    }
+    MESSAGES_PICKERS.forEach(k => {
+        if (uiPickerIsOpen(`messages-${k}`)) uiPickerClose(`messages-${k}`, { returnFocus: true });
+    });
+}
+
+function messagesTimePanelOpened() {
+    document.getElementById('messages-time-start').value = document.getElementById('messages-date-range-start').value;
+    document.getElementById('messages-time-end').value = document.getElementById('messages-date-range-end').value;
+}
+
+function toggleMessagesTimePanel(open) {
+    toggleMessagesPicker('time', open);
+}
+
+function applyMessagesTimePanelRange() {
+    document.getElementById('messages-date-range-start').value = document.getElementById('messages-time-start').value;
+    document.getElementById('messages-date-range-end').value = document.getElementById('messages-time-end').value;
+    applyMessagesCustomDateRange();
+}
 
 function toggleMessagesDateRangePicker() {
     const dropdown = document.getElementById('messages-date-range-dropdown');
@@ -3534,53 +4849,37 @@ function toggleMessagesDateRangePicker() {
     arrow.style.transform = isHidden ? 'rotate(180deg)' : '';
 }
 
-function selectMessagesDatePreset(preset) {
+function messagesPresetStart(preset, now = new Date()) {
+    if (preset === 'today') return zonedDayStart(zonedDateString(now)).toISOString();
+    const days = { '7days': 7, '30days': 30, '90days': 90 }[preset];
+    if (!days) return '';
+    return new Date(new Date(now).getTime() - days * 86400000).toISOString();
+}
+
+const MESSAGES_ROLLING_PRESETS = ['today', '7days', '30days', '90days'];
+function messagesRangeFilters(filters, now = new Date()) {
+    if (!MESSAGES_ROLLING_PRESETS.includes(filters.date_range)) return filters;
+    return { ...filters, start_date: messagesPresetStart(filters.date_range, now), end_date: '' };
+}
+
+function messagesShowDatePreset(preset, now = new Date()) {
     const labels = { '': 'All Time', 'today': 'Today', '7days': 'Last 7 Days', '30days': 'Last 30 Days', '90days': 'Last 90 Days' };
     document.getElementById('messages-date-range-label').textContent = labels[preset] || 'All Time';
     document.getElementById('messages-date-range').value = preset;
 
-    // Calculate actual dates for the API
-    const now = new Date();
-    let startDate = '';
-    let endDate = now.toISOString();
-
-    if (preset === 'today') {
-        const todayStart = new Date(now);
-        todayStart.setHours(0, 0, 0, 0);
-        startDate = todayStart.toISOString();
-    } else if (preset === '7days') {
-        const d = new Date(now);
-        d.setDate(d.getDate() - 7);
-        startDate = d.toISOString();
-    } else if (preset === '30days') {
-        const d = new Date(now);
-        d.setDate(d.getDate() - 30);
-        startDate = d.toISOString();
-    } else if (preset === '90days') {
-        const d = new Date(now);
-        d.setDate(d.getDate() - 90);
-        startDate = d.toISOString();
-    } else {
-        // All Time
-        startDate = '';
-        endDate = '';
-    }
-
+    const startDate = messagesPresetStart(preset, now);
     document.getElementById('messages-start-date').value = startDate;
-    document.getElementById('messages-end-date').value = endDate;
+    document.getElementById('messages-end-date').value = startDate ? new Date(now).toISOString() : '';
 
-    // Update preset button styles
-    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
-        if (btn.getAttribute('data-preset') === preset) {
-            btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-blue-500 bg-blue-500 text-white transition-colors';
-        } else {
-            btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-        }
-    });
+    setMessagesDatePresetActive(preset);
+}
 
-    // Close dropdown and apply
+function selectMessagesDatePreset(preset, now = new Date()) {
+    messagesShowDatePreset(preset, now);
+
     document.getElementById('messages-date-range-dropdown').classList.add('hidden');
     document.getElementById('messages-date-range-arrow').style.transform = '';
+    toggleMessagesTimePanel(false);
     applyMessagesFilters();
 }
 
@@ -3593,9 +4892,8 @@ function applyMessagesCustomDateRange() {
         return;
     }
 
-    const startDate = new Date(startInput);
-    const endDate = new Date(endInput);
-    endDate.setHours(23, 59, 59, 999);
+    const startDate = zonedDayStart(startInput);
+    const endDate = new Date(zonedDayStart(addDaysToDateString(endInput, 1)).getTime() - 1);
 
     if (startDate > endDate) {
         showToast('Start date must be before end date', 'warning');
@@ -3606,22 +4904,17 @@ function applyMessagesCustomDateRange() {
     document.getElementById('messages-start-date').value = startDate.toISOString();
     document.getElementById('messages-end-date').value = endDate.toISOString();
 
-    // Format label
-    const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    document.getElementById('messages-date-range-label').textContent = `${fmt(startDate)} - ${fmt(endDate)}`;
+    const fmt = day => formatDayKey(day);
+    document.getElementById('messages-date-range-label').textContent = `${fmt(startInput)} - ${fmt(endInput)}`;
 
-    // Reset preset button styles
-    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
-        btn.className = 'messages-date-preset-btn px-3 py-1.5 text-xs font-medium rounded-md border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors';
-    });
+    setMessagesDatePresetActive(null);
 
-    // Close dropdown and apply
     document.getElementById('messages-date-range-dropdown').classList.add('hidden');
     document.getElementById('messages-date-range-arrow').style.transform = '';
+    toggleMessagesTimePanel(false);
     applyMessagesFilters();
 }
 
-// Close messages date range picker on outside click
 document.addEventListener('click', function(e) {
     const container = document.getElementById('messages-date-range-picker-container');
     if (container && !container.contains(e.target)) {
@@ -3634,104 +4927,279 @@ document.addEventListener('click', function(e) {
     }
 });
 
-async function loadMessages(page = 1) {
-    const container = document.getElementById('messages-logs');
+const MESSAGE_STATUS_FACETS = [['', 'All messages'], ['delivered', 'Delivered'], ['deferred', 'Deferred'], ['bounced', 'Bounced'],
+    ['rejected', 'Rejected'], ['spam', 'Spam'], ['discarded', 'Discarded (Sieve)']];
+const MESSAGE_DIRECTION_FACETS = [['', 'Any direction'], ['inbound', 'Inbound'], ['outbound', 'Outbound'], ['internal', 'Internal']];
 
+function messagesFilterParams(filters) {
+    filters = messagesRangeFilters(filters);
+    const params = new URLSearchParams();
+    for (const key of MESSAGES_FILTER_KEYS) {
+        if (filters[key]) params.append(key, filters[key]);
+    }
+    return params;
+}
+
+function setMessagesFacet(kind, value) {
+    const select = document.getElementById(kind === 'status' ? 'messages-filter-status' : 'messages-filter-direction');
+    if (select) select.value = value;
+    toggleMessagesPicker(null, false);
+    applyMessagesFilters();
+}
+
+function renderFacetList(kind, entries, counts, current, asOptions = false) {
+    return entries.map(([value, label]) => {
+        const count = counts ? counts[value || 'all'] : undefined;
+        const tone = kind === 'status' && value ? (UI_STATUS_TONE[value] || '') : '';
+        const state = asOptions ? `role="option" tabindex="-1" aria-selected="${String(current === value)}"` : `aria-pressed="${String(current === value)}"`;
+        return `<button type="button" class="ui-fct" ${state} onclick="setMessagesFacet('${kind}', '${value}')">
+            ${kind === 'status' && value ? `<i class="ui-fct-dot${tone ? ` ui-fct-${tone}` : ''}"></i>` : ''}${kind === 'direction' && value ? `<i class="ui-fct-dot ui-dir-${value}"></i>` : ''}<span>${escapeHtml(label)}</span>
+            <small>${count === undefined ? '' : escapeHtml(String(count))}</small></button>`;
+    }).join('');
+}
+
+async function loadMessageFacets(filters, gen = messagesGen) {
+    const statusList = document.getElementById('messages-facet-status');
+    const directionList = document.getElementById('messages-facet-direction');
+    let data = null;
     try {
-        container.innerHTML = '<div class="text-center py-8"><div class="loading mx-auto mb-4"></div><p class="text-gray-500 dark:text-gray-400">Loading...</p></div>';
+        const params = messagesFilterParams(filters);
+        for (const preset of ['today', '7days', '30days', '90days']) params.append('since', `${preset}:${messagesPresetStart(preset)}`);
+        const response = await messagesFetch(`/api/messages/facets?${params}`);
+        if (response.ok) data = await response.json();
+    } catch (e) {
+        if (e.name !== 'AbortError') console.warn('Failed to load message facets:', e);
+    }
+    if (gen !== messagesGen) return;
+    const status = filters.status || '';
+    const direction = filters.direction || '';
+    if (statusList) statusList.innerHTML = renderFacetList('status', MESSAGE_STATUS_FACETS, data && data.status, status);
+    if (directionList) directionList.innerHTML = renderFacetList('direction', MESSAGE_DIRECTION_FACETS, data && data.direction, direction);
+    document.querySelectorAll('.messages-date-preset-btn').forEach(btn => {
+        const count = data && data.time ? data.time[btn.dataset.preset || 'all'] : undefined;
+        let small = btn.querySelector('small');
+        if (!small) { small = document.createElement('small'); btn.appendChild(small); }
+        small.textContent = count === undefined ? '' : String(count);
+    });
+    const pick = (kind, entries, counts, current, anyLabel) => {
+        const options = document.getElementById(`messages-${kind}-options`);
+        if (options) options.innerHTML = renderFacetList(kind, entries, counts, current, true);
+        const button = document.getElementById(`messages-${kind}-pick`);
+        const valueLabel = document.getElementById(`messages-${kind}-value`);
+        const chosen = entries.find(([value]) => value === current);
+        if (valueLabel) valueLabel.textContent = current && chosen ? chosen[1] : anyLabel;
+        if (button) button.classList.toggle('is-set', !!current);
+    };
+    pick('status', MESSAGE_STATUS_FACETS, data && data.status, status, 'All');
+    pick('direction', MESSAGE_DIRECTION_FACETS, data && data.direction, direction, 'Any');
+    uiPickerRefocus();
+    const timeButton = document.getElementById('messages-time-pick');
+    if (timeButton) timeButton.classList.toggle('is-set', !!(filters.start_date || filters.end_date));
+}
 
-        const filters = currentFilters.messages || {};
-        const params = new URLSearchParams({
-            page: page,
-            limit: 50
-        });
-
-        if (filters.search) params.append('search', filters.search);
-        if (filters.sender) params.append('sender', filters.sender);
-        if (filters.recipient) params.append('recipient', filters.recipient);
-        if (filters.direction) params.append('direction', filters.direction);
-        if (filters.user) params.append('user', filters.user);
-        if (filters.status) params.append('status', filters.status);
-        if (filters.ip) params.append('ip', filters.ip);
-        if (filters.start_date) params.append('start_date', filters.start_date);
-        if (filters.end_date) params.append('end_date', filters.end_date);
-
-        console.log('Loading Messages:', `/api/messages?${params}`);
-
-        const response = await authenticatedFetch(`/api/messages?${params}`);
-        if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        const data = await response.json();
-        console.log('Messages data:', data);
-
-        // Update count display
-        const countEl = document.getElementById('messages-count');
-        if (countEl) {
-            countEl.textContent = data.total ? `(${data.total.toLocaleString()} results)` : '';
-        }
-
-        if (!data.data || data.data.length === 0) {
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No messages found</p>';
-            return;
-        }
-
-        container.innerHTML = `
-            <div class="space-y-3">
-                ${data.data.map(msg => `
-                    <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 bg-white dark:bg-gray-800 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition cursor-pointer" onclick="viewMessageDetails('${msg.correlation_key}')">
-                        <div class="grid grid-cols-1 sm:grid-cols-[1fr_auto] gap-2 mb-2 items-start">
-                            <div class="min-w-0 overflow-hidden">
-                                <div class="flex flex-wrap items-center gap-2 mb-1">
-                                    <span class="text-sm font-medium text-gray-900 dark:text-white">${escapeHtml(msg.sender || 'Unknown')}</span>
-                                    <svg class="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                    </svg>
-                                    <span class="text-sm text-gray-600 dark:text-gray-300">${escapeHtml(msg.recipient || 'Unknown')}</span>
-                                </div>
-                                <p class="text-xs text-gray-500 dark:text-gray-400 truncate" dir="auto" title="${escapeHtml(msg.subject || 'No subject')}">${escapeHtml(msg.subject || 'No subject')}</p>
-                            </div>
-                            <div class="flex flex-wrap items-center gap-2 flex-shrink-0 sm:justify-end">
-                                ${(() => {
-                const correlationStatus = getCorrelationStatusDisplay(msg);
-                if (correlationStatus) {
-                    return `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${correlationStatus.class}" title="${msg.final_status || (msg.is_complete ? 'Correlation complete' : 'Waiting for Postfix logs')}">${correlationStatus.display}</span>`;
-                }
-                return '';
-            })()}
-                                ${msg.direction ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${getDirectionClass(msg.direction)}">${msg.direction}</span>` : ''}
-                                ${msg.is_spam !== null ? `<span class="inline-block px-2 py-0.5 text-xs font-medium rounded ${msg.is_spam ? 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300' : 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300'}">${msg.is_spam ? 'SPAM' : 'CLEAN'}</span>` : ''}
-                            </div>
-                        </div>
-                        <div class="flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-                            <span>${formatTime(msg.first_seen)}</span>
-                            ${msg.queue_id ? `<span class="font-mono" title="Queue ID">Q: ${msg.queue_id}</span>` : ''}
-                            ${msg.message_id ? `<span class="font-mono truncate max-w-xs" title="Message ID: ${escapeHtml(msg.message_id)}">MID: ${escapeHtml(msg.message_id.substring(0, 20))}${msg.message_id.length > 20 ? '...' : ''}</span>` : ''}
-                            ${msg.spam_score !== null ? `<span>Score: <span class="${msg.spam_score >= 15 ? 'text-red-600 dark:text-red-400 font-semibold' : 'text-gray-600 dark:text-gray-300'}">${msg.spam_score.toFixed(1)}</span></span>` : ''}
-                            ${renderMailboxFolderHint(msg)}
-                            ${renderDeliveriesChip(msg)}
-                            ${msg.user ? `<span>User: ${escapeHtml(msg.user)}</span>` : ''}
-                            ${msg.ip ? `<span>IP: ${msg.ip}</span>` : ''}
-                        </div>
-                    </div>
-                `).join('')}
-            </div>
-            ${renderPagination('messages', data.page, data.pages)}
-        `;
-
-        currentPage.messages = page;
+async function messagesNoIdFacets(filters, gen = messagesGen) {
+    const presets = document.querySelectorAll('.messages-date-preset-btn');
+    const show = time => presets.forEach(btn => {
+        const count = time ? time[btn.dataset.preset || 'all'] : undefined;
+        let small = btn.querySelector('small');
+        if (!small) { small = document.createElement('small'); btn.appendChild(small); }
+        small.textContent = count === undefined ? '' : String(count);
+    });
+    show(null);
+    const timeButton = document.getElementById('messages-time-pick');
+    if (timeButton) timeButton.classList.toggle('is-set', !!(filters.start_date || filters.end_date));
+    const params = new URLSearchParams({ limit: 1 });
+    if (filters.search) params.append('search', filters.search);
+    for (const preset of ['today', '7days', '30days', '90days']) params.append('since', `${preset}:${messagesPresetStart(preset)}`);
+    try {
+        const response = await messagesFetch(`/api/messages/without-message-id?${params}`);
+        const data = response.ok ? await response.json() : null;
+        if (gen === messagesGen && messagesNoId && data) show(data.time);
     } catch (error) {
-        console.error('Failed to load messages:', error);
-        document.getElementById('messages-logs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load messages: ${escapeHtml(error.message)}</p>`;
-        const countEl = document.getElementById('messages-count');
-        if (countEl) countEl.textContent = '';
+        if (error.name !== 'AbortError') console.warn('Failed to count messages without a Message-ID by time:', error);
     }
 }
 
-// =============================================================================
-// STATUS TAB
-// =============================================================================
+function afterMessagesRendered(data) {
+    if (typeof markSelectedMessageRow === 'function' && window.openMessageKey) markSelectedMessageRow(window.openMessageKey);
+    const modal = document.getElementById('message-modal');
+    const slot = typeof messageReaderSlot === 'function' ? messageReaderSlot() : null;
+    if (slot && modal && modal.classList.contains('hidden') && data.data && data.data.length) {
+        viewMessageDetails(data.data[0].correlation_key);
+    }
+}
+
+async function loadMessages({ quiet = false, rows = 50, toEnd = false, applyIf = null } = {}) {
+    const container = document.getElementById('messages-logs');
+    renderMessagesSort();
+    const gen = messagesNewGeneration();
+    messagesFullLoad = true;
+    if (!quiet) container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
+    const filters = currentFilters.messages || {};
+    if (messagesNoId) messagesNoIdFacets(filters, gen);
+    else loadMessageFacets(filters, gen);
+    updateMessagesFilterState();
+    renderMessagesNoId();
+    if (!quiet) container.scrollTop = 0;
+    try {
+        const timeout = quiet ? PAGE_REFRESH_TIMEOUT : 0;
+        const response = await messagesFetch(messagesListUrl(messagesQueryParams(null, Math.min(500, rows))), timeout);
+        if (!response.ok) {
+            throw await responseError(response);
+        }
+        const data = await response.json();
+        while (data.next_cursor && (data.data || []).length < rows && gen === messagesGen) {
+            const next = await messagesFetch(messagesListUrl(messagesQueryParams(data.next_cursor, Math.min(500, rows - data.data.length), data.watermark)), timeout);
+            if (!next.ok) throw await responseError(next);
+            const page = await next.json();
+            data.data = data.data.concat(page.data || []);
+            data.next_cursor = page.next_cursor;
+            data.total = page.total ?? data.total;
+        }
+        if (gen !== messagesGen) return;
+        if (applyIf && !applyIf()) {
+            renderMessagesNew();
+            return;
+        }
+        if (quiet && messagesSameAsShown(data) && (data.data || []).length === (lastDataCache.messages.data || []).length) {
+            if (data.watermark != null) messagesNew.watermark = data.watermark;
+            messagesNew.count = 0;
+            renderMessagesNew();
+            return;
+        }
+        if (quiet) uiKeepFocus(container, 'data-key', () => showMessagesFirstPage(container, data));
+        else showMessagesFirstPage(container, data);
+        afterMessagesRendered(data);
+        refreshMessagesNoId();
+        if (toEnd) messagesScrollToEnd(container);
+    } catch (error) {
+        if (gen !== messagesGen) return;
+        if (quiet) return;
+        console.error('Failed to load messages:', error);
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load messages: ${escapeHtml(uiSentence(uiErrorText(error)))} <button type="button" class="ui-link-row ui-link" onclick="loadMessages()">Try again</button></p>`;
+        setMessagesCount(null);
+        messagesPaging.page = 1;
+        messagesPaging.cursor = null;
+        messagesPaging.total = 0;
+        currentPage.messages = 1;
+        lastDataCache.messages = null;
+    } finally {
+        if (gen === messagesGen) messagesFullLoad = false;
+    }
+}
+
+const statusState = { containers: null, blocklists: null, jobs: null };
+let statusTab = 'server';
+
+function openStatusTab(tab) {
+    statusShowTab(tab);
+    navigateTo('status');
+}
+
+function summarizeJobs(jobs) {
+    const all = statusJobCategories(jobs || {}).flatMap(cat => cat.jobs.filter(j => j[2]));
+    const isOff = job => job.feature_disabled === true || job.status === 'disabled' || job.enabled === false;
+    const failed = all.filter(([, , job]) => !isOff(job) && job.status === 'failed');
+    const off = all.filter(([, , job]) => isOff(job)).length;
+    return { all, isOff, failed, off, healthy: all.length - failed.length - off, running: all.length - off };
+}
+let statusCtrFilter = 'all';
+let statusJobFilterValue = 'all';
+
+function statusShowTab(tab) {
+    statusTab = tab;
+    routerSyncSubpage('status', tab);
+    document.querySelectorAll('.ui-st-tabs .modal-tab').forEach(btn => {
+        const on = btn.id === `status-tab-btn-${tab}`;
+        btn.classList.toggle('active', on);
+        btn.setAttribute('aria-selected', on);
+    });
+    document.querySelectorAll('.ui-st-panel').forEach(panel => panel.classList.toggle('hidden', panel.id !== `status-tab-${tab}`));
+}
+
+function setStatusTabCount(tab, count, isFail) {
+    const el = document.getElementById(`status-tab-n-${tab}`);
+    if (!el) return;
+    el.textContent = count;
+    el.classList.toggle('hidden', !count);
+    el.classList.toggle('is-fail', !!isFail);
+}
+
+function statusContainerFilter(filter) {
+    statusCtrFilter = filter;
+    document.querySelectorAll('[data-ctr-filter]').forEach(b => b.setAttribute('aria-pressed', b.dataset.ctrFilter === filter));
+    document.querySelectorAll('#status-containers .ui-ctr').forEach(row => {
+        row.hidden = filter === 'problems' && !row.classList.contains('is-down');
+    });
+}
+
+function statusJobFilter(filter) {
+    statusJobFilterValue = filter;
+    document.querySelectorAll('[data-job-filter]').forEach(b => b.setAttribute('aria-pressed', b.dataset.jobFilter === filter));
+    document.querySelectorAll('#status-jobs .ui-jg').forEach(group => {
+        let shown = 0;
+        group.querySelectorAll('.ui-jobrow').forEach(row => {
+            const show = filter === 'all' || (filter === 'problems' && row.classList.contains('is-failed'))
+                || (filter === 'off' && row.classList.contains('is-off'));
+            row.hidden = !show;
+            if (show) shown++;
+        });
+        group.hidden = shown === 0;
+        group.open = filter === 'all' ? (group.hasAttribute('data-failed') || statusJobsOpen.has(group.dataset.group)) : shown > 0;
+    });
+}
+
+function blocklistLookupLink(r, label) {
+    if (!/^https:\/\//.test(r.info_url || '')) return '';
+    return `<a href="${escapeHtml(r.info_url)}" target="_blank" rel="noopener noreferrer" class="ui-btn ui-btn-sm" title="Look up on ${escapeHtml(r.name)}">${label}</a>`;
+}
+
+function renderStatusAttention() {
+    const box = document.getElementById('status-attention');
+    const count = document.getElementById('status-attention-count');
+    if (!box) return;
+    const items = [];
+    for (const c of statusState.containers || []) {
+        if (c.ignored || c.running) continue;
+        items.push({ tone: 'fail', title: `${c.name} is stopped`, detail: `State: ${c.state}. It is not running, so what it does is off until it starts again.`,
+            actions: `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${escapeJsArg(c.container)}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}" data-acts="status">Ignore</button>` });
+    }
+    const blOff = (window.disabledFeatures || []).includes('blacklist');
+    for (const host of blOff ? [] : (statusState.blocklists || [])) {
+        for (const r of (host.results || []).filter(x => x.listed && !x.ignored)) {
+            items.push({ tone: 'fail', title: `${host.hostname} is on ${r.name}`,
+                detail: `${host.source || 'system'}, listed on ${host.listed_count || 1} of ${host.total_blacklists || '?'} lists. Mail to some providers may bounce.`,
+                actions: `${blocklistLookupLink(r, 'Look up')}<button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', true)" title="Keep checking ${escapeHtml(r.name)} but never count or alert on it" data-acts="status">Ignore this list</button>` });
+        }
+    }
+    for (const job of statusState.jobs || []) {
+        if (!job.failed) continue;
+        items.push({ tone: 'warn', title: `${job.name} failed`, detail: job.error || 'The last run did not finish.',
+            actions: `<button type="button" class="ui-btn ui-btn-sm" onclick="triggerBackgroundJob('${escapeJsArg(job.key)}', this, '${escapeJsArg(job.name)}')" data-acts="admin">Run now</button>` });
+    }
+    const loaded = statusState.containers && statusState.jobs;
+    if (count) count.textContent = items.length ? String(items.length) : '';
+    if (!items.length) {
+        box.innerHTML = loaded ? '<p class="ui-st-allgood">Everything is running. Nothing needs you right now.</p>'
+            : '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading...</p></div>';
+        return;
+    }
+    box.innerHTML = items.map(item => `
+        <div class="ui-alert ui-alert-${item.tone}">
+            <div class="ui-alert-text"><div class="ui-alert-title"><b>${escapeHtml(item.title)}</b></div><p>${escapeHtml(item.detail)}</p></div>
+            <div class="ui-st-acts">${item.actions}</div>
+        </div>`).join('');
+}
+
+let statusQuiet = false;
+function statusFailed(el, html) {
+    if (el && (!statusQuiet || el.querySelector('.ui-loading'))) el.innerHTML = html;
+}
+function statusHold(container) {
+    if (!statusQuiet || !container) return false;
+    const active = document.activeElement;
+    return uiTextHeld(container) || Boolean(active && container.contains(active) && active.matches(':focus-visible'));
+}
 
 async function loadStatus() {
     try {
@@ -3739,89 +5207,116 @@ async function loadStatus() {
             loadStatusContainers(),
             loadStatusSystem(),
             loadStatusStorage(),
-            loadStatusExtended()
+            loadStatusExtended(),
+            loadStatusAppVersion()
         ]);
+        const lastChecked = document.getElementById('status-last-checked');
+        uiAgo(lastChecked, new Date().toISOString(), 'Updated ');
+        renderStatusAttention();
     } catch (error) {
         console.error('Failed to load status:', error);
+    }
+}
+
+function setStatusKpi(id, value, tone) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = value;
+    el.className = tone ? `ui-${tone}` : '';
+}
+
+async function loadStatusAppVersion() {
+    const note = document.getElementById('status-kpi-version-note');
+    try {
+        const res = await authenticatedFetch('/api/status/app-version');
+        if (!res.ok) throw await responseError(res);
+        const data = await res.json();
+        setStatusKpi('status-kpi-version', data.current_version || '-');
+        if (note) {
+            note.innerHTML = data.update_available
+                ? `<button data-acts="admin" type="button" class="ui-link-row ui-text-info" onclick="navigateTo('settings')">Update ${escapeHtml(data.latest_version)} available</button>`
+                : 'Up to date';
+        }
+    } catch (error) {
+        setStatusKpi('status-kpi-version', '-');
+        if (note) note.textContent = 'Version';
+    }
+}
+
+async function setContainerIgnored(container, ignored) {
+    if (!uiMayAct('status')) return;
+    try {
+        const res = await authenticatedFetch(`/api/status/containers/${encodeURIComponent(container)}/ignore`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ignored })
+        });
+        if (!res.ok) throw await responseError(res);
+        showToast(ignored ? `${container.replace('-mailcow', '')} is ignored. It no longer counts or alerts.` : `${container.replace('-mailcow', '')} counts again.`, 'success');
+        loadStatusContainers();
+        loadNavCounters();
+    } catch (e) {
+        showToast(`Could not change the container: ${uiErrorText(e)}`, 'error');
     }
 }
 
 async function loadStatusContainers() {
     try {
         const response = await authenticatedFetch('/api/status/containers');
-        let data = await response.json();
+        if (!response.ok) throw await responseError(response);
+        const data = await response.json();
 
         const container = document.getElementById('status-containers');
 
-        let containersData = data.containers || data;
+        const containersList = Object.entries(data.containers).map(([key, value]) => ({
+            name: (value.name || key).replace('-mailcow', ''),
+            container: key,
+            state: value.state || 'unknown',
+            started_at: value.started_at || null,
+            ignored: !!value.ignored
+        }));
 
-        if (Array.isArray(containersData) && containersData.length === 1 && typeof containersData[0] === 'object') {
-            containersData = containersData[0];
-        }
-
-        let containersList = [];
-        if (Array.isArray(containersData)) {
-            containersList = containersData;
-        } else if (containersData && typeof containersData === 'object') {
-            containersList = Object.entries(containersData).map(([key, value]) => ({
-                name: (value.name || key).replace('-mailcow', ''),
-                container: key,
-                state: value.state || 'unknown',
-                started_at: value.started_at || null
-            }));
-        }
-
+        const note = document.getElementById('status-containers-note');
         if (containersList.length > 0) {
-            // Normalize states and count: only 'running' is running, everything else is stopped
-            // This includes: paused, exited, stopped, created, restarting, removing, dead, unknown, etc.
-            const running = containersList.filter(c => {
-                const state = (c.state || 'unknown').toString().toLowerCase().trim();
-                return state === 'running';
-            }).length;
-            const stopped = containersList.length - running;
-            const total = containersList.length;
+            const isRunning = c => (c.state || 'unknown').toString().toLowerCase().trim() === 'running';
+            const counted = containersList.filter(c => !c.ignored);
+            const running = counted.filter(isRunning).length;
+            const stopped = counted.length - running;
+            const ignoredCount = containersList.length - counted.length;
+            setStatusKpi('status-kpi-containers', `${running} of ${counted.length} running`, stopped > 0 ? 'fail' : '');
+            const summaryText = [stopped ? `${stopped} stopped` : 'All running', ignoredCount ? `${ignoredCount} ignored` : ''].filter(Boolean).join(', ');
+            if (note) note.textContent = summaryText;
+            const summary = document.getElementById('status-containers-summary');
+            if (summary) summary.textContent = summaryText;
+            setStatusTabCount('server', stopped, true);
+            statusState.containers = containersList.map(c => ({ ...c, running: isRunning(c) }));
 
-            container.innerHTML = `
-                <!-- Summary FIRST -->
-                <div class="mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
-                    <div class="grid grid-cols-3 gap-4 text-center">
-                        <div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">Total</p>
-                            <p class="text-xl font-bold text-gray-900 dark:text-white">${total}</p>
-                        </div>
-                        <div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">Running</p>
-                            <p class="text-xl font-bold text-green-600 dark:text-green-400">${running}</p>
-                        </div>
-                        <div>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">Stopped</p>
-                            <p class="text-xl font-bold text-red-600 dark:text-red-400">${stopped}</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Containers list -->
-                <div class="space-y-2 max-h-96 overflow-y-auto" style="scrollbar-width: thin;">
-                    ${containersList.map(c => `
-                        <div class="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                            <div class="flex items-center gap-3 flex-1">
-                                <div class="w-2 h-2 rounded-full flex-shrink-0 ${c.state === 'running' ? 'bg-green-500' : 'bg-red-500'}"></div>
-                                <div class="min-w-0 flex-1">
-                                    <p class="text-sm font-medium text-gray-900 dark:text-white truncate">${escapeHtml(c.name)}</p>
-                                    <p class="text-xs text-gray-500 dark:text-gray-400">${c.started_at ? new Date(c.started_at).toLocaleString('he-IL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Unknown'}</p>
-                                </div>
-                            </div>
-                            <span class="text-xs px-2 py-1 rounded flex-shrink-0 ${c.state === 'running' ? 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-300' : 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-300'}">${c.state}</span>
-                        </div>
-                    `).join('')}
-                </div>
-            `;
+            const rank = c => c.ignored ? 2 : (isRunning(c) ? 1 : 0);
+            const ordered = [...containersList].sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
+            if (!statusHold(container)) container.innerHTML = `<div class="ui-ctrs">${ordered.map(c => {
+                const up = isRunning(c);
+                const since = c.started_at ? formatAgo(c.started_at).replace(' ago', '') : '';
+                const arg = escapeJsArg(c.container);
+                const action = c.ignored
+                    ? `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', false)" data-acts="status">Stop ignoring</button>`
+                    : (up ? '' : `<button type="button" class="ui-btn ui-btn-sm" onclick="setContainerIgnored('${arg}', true)" title="Stop counting and alerting on ${escapeHtml(c.name)}" data-acts="status">Ignore</button>`);
+                const state = c.ignored ? 'ignored' : (up ? (since ? `up ${since}` : 'running') : String(c.state || 'unknown'));
+                return `
+                <div class="ui-ctr${c.ignored ? ' is-ignored' : (up ? '' : ' is-down')}" title="${escapeHtml(c.ignored ? 'Ignored: shown here but never counted or alerted' : (c.started_at ? `Started ${formatTime(c.started_at)}` : 'Start time unknown'))}">
+                    <i class="ui-mdot${c.ignored ? '' : (up ? ' ui-mdot-ok' : ' ui-mdot-fail')}"></i>
+                    <b>${escapeHtml(c.name)}</b>
+                    <small>${escapeHtml(state)}</small>${action ? `<span class="ui-ctr-act">${action}</span>` : ''}
+                </div>`;
+            }).join('')}</div>`;
+            statusContainerFilter(statusCtrFilter);
+            renderStatusAttention();
         } else {
-            container.innerHTML = '<p class="text-gray-500 dark:text-gray-400 text-center py-8">No container information available</p>';
+            setStatusKpi('status-kpi-containers', '-');
+            if (note) note.textContent = '';
+            if (!statusHold(container)) container.innerHTML = '<p class="ui-empty ui-panel">No container information available</p>';
         }
     } catch (error) {
         console.error('Failed to load containers status:', error);
-        document.getElementById('status-containers').innerHTML = '<p class="text-red-500 text-center py-8">Failed to load containers</p>';
+        setStatusKpi('status-kpi-containers', '-');
+        statusFailed(document.getElementById('status-containers'), `<p class="ui-empty ui-panel ui-text-fail">Failed to load containers: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadStatusContainers()')}</p>`);
     }
 }
 
@@ -3831,14 +5326,13 @@ async function loadStatusSystem() {
     try {
         console.log('Loading System Info...');
 
-        // Fetch both system info and version status
         const [infoResponse, versionResponse] = await Promise.all([
             authenticatedFetch('/api/status/mailcow-info'),
             authenticatedFetch('/api/status/version')
         ]);
 
         if (!infoResponse.ok) {
-            throw new Error(`HTTP ${infoResponse.status}: ${infoResponse.statusText}`);
+            throw await responseError(infoResponse);
         }
 
         const data = await infoResponse.json();
@@ -3848,61 +5342,33 @@ async function loadStatusSystem() {
 
         let versionHtml = '';
         if (versionData && versionData.current_version) {
-            // Store data globally to avoid passing complex strings in HTML
             window.mailcowUpdateVersion = versionData.latest_version;
-            window.mailcowUpdateName = versionData.name || ''; // Store release title
+            window.mailcowUpdateName = versionData.name || '';
             window.mailcowUpdateChangelog = versionData.changelog || 'No changelog available';
 
-            const updateBadge = versionData.update_available ?
-                `<button onclick="showMailcowUpdateModal()" 
-                    class="ml-2 px-2 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-800 dark:text-blue-300 rounded text-xs font-medium hover:bg-blue-200 dark:hover:bg-blue-900/50 cursor-pointer transition-colors">
-                    Update Available
-                </button>` : '';
-
-            versionHtml = `
-                <div class="mt-4 pt-4 border-t border-gray-100 dark:border-gray-700 mx-1">
-                    <div class="flex items-center justify-between">
-                        <span class="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">mailcow Version</span>
-                        <div class="flex items-center">
-                            <span class="text-sm font-bold text-gray-900 dark:text-white">v${versionData.current_version}</span>
-                            ${updateBadge}
-                        </div>
-                    </div>
-                </div>
-            `;
+            const updateBadge = versionData.update_available
+                ? ` <button onclick="showMailcowUpdateModal()" class="ui-tag ui-tag-info ui-tag-btn">Update Available</button>`
+                : '';
+            versionHtml = `v${escapeHtml(versionData.current_version)}${updateBadge}`;
         }
 
-        container.innerHTML = `
-            <div class="space-y-4">
-                <div class="grid grid-cols-2 gap-4">
-                    <div class="text-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                        <p class="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Domains</p>
-                        <p class="text-2xl font-bold text-gray-900 dark:text-white">${data.domains.total}</p>
-                        <p class="text-xs text-green-600 dark:text-green-400 mt-1">${data.domains.active} active</p>
-                    </div>
-                    <div class="text-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                        <p class="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Mailboxes</p>
-                        <p class="text-2xl font-bold text-gray-900 dark:text-white">${data.mailboxes.total}</p>
-                        <p class="text-xs text-green-600 dark:text-green-400 mt-1">${data.mailboxes.active} active</p>
-                    </div>
-                </div>
-                <div class="text-center p-4 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
-                    <p class="text-xs text-gray-500 dark:text-gray-400 uppercase mb-1">Aliases</p>
-                    <p class="text-2xl font-bold text-gray-900 dark:text-white">${data.aliases.total}</p>
-                    <p class="text-xs text-green-600 dark:text-green-400 mt-1">${data.aliases.active} active</p>
-                </div>
-                ${versionHtml}
-            </div>
+        const row = (label, part) => `<dt>${label}</dt><dd>${Number(part.total || 0).toLocaleString()} <small>${Number(part.active || 0).toLocaleString()} active</small></dd>`;
+        if (!statusHold(container)) container.innerHTML = `
+            <div class="ui-srv-big">${versionHtml || 'mailcow'}</div>
+            <dl class="ui-srv-dl">
+                ${row('Domains', data.domains || {})}
+                ${row('Mailboxes', data.mailboxes || {})}
+                ${row('Aliases', data.aliases || {})}
+            </dl>
         `;
     } catch (error) {
         console.error('Failed to load system info:', error);
-        document.getElementById('status-system').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load system info: ${escapeHtml(error.message)}</p>`;
+        statusFailed(document.getElementById('status-system'), `<p class="ui-empty ui-text-fail">Failed to load system info: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadStatusSystem()')}</p>`);
     }
 }
 
 function showMailcowUpdateModal() {
     if (window.mailcowUpdateVersion && window.mailcowUpdateChangelog) {
-        // Use release name as title if available, otherwise fallback to version
         const title = window.mailcowUpdateName
             ? `Update Available: ${window.mailcowUpdateName}`
             : `mailcow Update: ${window.mailcowUpdateVersion}`;
@@ -3921,60 +5387,28 @@ async function loadStatusStorage() {
 
         const response = await authenticatedFetch('/api/status/storage');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            throw await responseError(response);
         }
 
-        let rawData = await response.json();
-        console.log('Storage info data:', rawData);
+        const data = await response.json();
+        console.log('Storage info data:', data);
 
-        // Handle mailcow API format: [{ "type": "info", "disk": "/dev/sdb1", ... }]
-        let data = rawData;
-        if (Array.isArray(rawData) && rawData.length > 0) {
-            data = rawData[0]; // Take first element
-        }
         const usedPercent = parseInt(data.used_percent) || 0;
-        const storageColor = usedPercent > 90 ? 'bg-red-600' :
-            usedPercent > 75 ? 'bg-yellow-600' :
-                'bg-green-600';
-        const textColor = usedPercent > 90 ? 'text-red-600 dark:text-red-400' :
-            usedPercent > 75 ? 'text-yellow-600 dark:text-yellow-400' :
-                'text-green-600 dark:text-green-400';
+        const level = usedPercent > 90 ? 'fail' : usedPercent > 75 ? 'warn' : 'ok';
+        setStatusKpi('status-kpi-storage', `${data.used_percent || `${usedPercent}%`} used`, level === 'ok' ? '' : level);
+        const storageNote = document.getElementById('status-kpi-storage-note');
+        if (storageNote) storageNote.textContent = [data.used && data.total ? `${data.used} of ${data.total}` : '', data.disk || ''].filter(Boolean).join(', ');
 
-        container.innerHTML = `
-            <div class="space-y-6">
-                <div class="text-center">
-                    <p class="text-5xl font-bold ${textColor} mb-2">${data.used_percent}</p>
-                    <p class="text-sm text-gray-600 dark:text-gray-400">Storage Used</p>
-                </div>
-                
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-4">
-                    <div class="${storageColor} h-4 rounded-full transition-all duration-300" style="width: ${usedPercent}%"></div>
-                </div>
-                
-                <div class="grid grid-cols-2 gap-4 text-center">
-                    <div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Used</p>
-                        <p class="text-lg font-semibold text-gray-900 dark:text-white">${data.used}</p>
-                    </div>
-                    <div>
-                        <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">Total</p>
-                        <p class="text-lg font-semibold text-gray-900 dark:text-white">${data.total}</p>
-                    </div>
-                </div>
-                
-                <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3">
-                    <p class="text-xs text-gray-600 dark:text-gray-400">
-                        <svg class="inline w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"></path>
-                        </svg>
-                        Disk: ${data.disk}
-                    </p>
-                </div>
-            </div>
+        const size = [data.used && data.total ? `${data.used} of ${data.total}` : '', data.disk ? `on ${data.disk}` : ''].filter(Boolean).join(' ');
+        if (!statusHold(container)) container.innerHTML = `
+            <div class="ui-srv-big${level === 'ok' ? '' : ` ui-text-${level}`}">${escapeHtml(String(data.used_percent || '0%'))} used</div>
+            <div class="ui-meter ui-${level}"><i style="width: ${usedPercent}%"></i></div>
+            ${size ? `<small>${escapeHtml(size)}</small>` : ''}
         `;
     } catch (error) {
         console.error('Failed to load storage info:', error);
-        document.getElementById('status-storage').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load storage info: ${escapeHtml(error.message)}</p>`;
+        setStatusKpi('status-kpi-storage', '-');
+        statusFailed(document.getElementById('status-storage'), `<p class="ui-empty ui-text-fail">Failed to load storage info: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadStatusStorage()')}</p>`);
     }
 }
 
@@ -3982,29 +5416,25 @@ async function loadStatusExtended() {
     try {
         const response = await authenticatedFetch('/api/settings/info');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
         console.log('Extended status data loaded:', data);
 
-        // Render Import Status
         renderStatusImport(data.import_status || {});
 
-        // Render Correlation Status
-        renderStatusCorrelation(data.correlation_status || {}, data.recent_incomplete_correlations || []);
+        renderStatusCorrelation(data.correlation_status || {}, data.recent_incomplete_correlations || [], (data.configuration || {}).max_correlation_age_minutes);
 
-        // Render Background Jobs
         renderStatusJobs(data.background_jobs || {});
 
-        // Load Blacklist Status separately
-        loadBlacklistStatus();
+        await loadBlacklistStatus();
 
     } catch (error) {
         console.error('Failed to load extended status:', error);
-        document.getElementById('status-import').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
-        document.getElementById('status-correlation').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
-        document.getElementById('status-jobs').innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
+        statusFailed(document.getElementById('status-import'), `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadStatusExtended()')}</p>`);
+        statusFailed(document.getElementById('status-correlation'), `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadStatusExtended()')}</p>`);
+        statusFailed(document.getElementById('status-jobs'), `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadStatusExtended()')}</p>`);
     }
 }
 
@@ -4012,14 +5442,18 @@ function checkHost(hostname) {
     return checkBlacklists(true, hostname);
 }
 
+let blacklistCheckBtnIdle = null;
+
 async function checkBlacklists(force = false, host = null) {
+    if (!uiMayAct('status')) return;
     const btn = document.getElementById('blacklist-check-btn');
     const container = document.getElementById('status-blacklist');
 
     if (btn) {
+        if (blacklistCheckBtnIdle === null) blacklistCheckBtnIdle = btn.innerHTML;
         btn.disabled = true;
         btn.innerHTML = `
-            <svg class="animate-spin -ml-1 mr-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <svg class="animate-spin -ms-1 me-2 h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
@@ -4029,33 +5463,28 @@ async function checkBlacklists(force = false, host = null) {
 
     showToast('Starting blacklist check...', 'info');
 
-    // Inject temporary progress bar at the top
     if (container) {
-        // Remove existing temp progress if any
         const existing = document.getElementById('blacklist-temp-progress');
         if (existing) existing.remove();
 
         const progressHtml = `
-            <div id="blacklist-temp-progress" class="mb-4 p-4 bg-white dark:bg-gray-800 rounded-lg border border-blue-200 dark:border-blue-900 shadow-sm">
-                <div class="flex justify-between items-center mb-2">
-                    <span class="text-sm font-medium text-blue-700 dark:text-blue-400 flex items-center gap-2">
+            <div id="blacklist-temp-progress" class="ui-panel ui-bl-progress">
+                <div class="ui-bl-progress-head">
+                    <span class="ui-text-info">
                         <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                         </svg>
                         Running Scan...
                     </span>
-                    <span id="blacklist-progress-text" class="text-xs text-gray-500 dark:text-gray-400">Initializing...</span>
+                    <span id="blacklist-progress-text" class="ui-muted">Initializing...</span>
                 </div>
-                <div class="w-full bg-gray-200 dark:bg-gray-700 rounded-full h-2">
-                    <div id="blacklist-progress-bar" class="bg-blue-600 h-2 rounded-full transition-all duration-300" style="width: 0%"></div>
-                </div>
+                <div class="ui-meter ui-meter-info"><i id="blacklist-progress-bar" style="width: 0%"></i></div>
             </div>
         `;
         container.insertAdjacentHTML('afterbegin', progressHtml);
     }
 
-    // Start progress polling
     let progressInterval = setInterval(async () => {
         try {
             const progressRes = await authenticatedFetch('/api/blacklist/progress');
@@ -4074,15 +5503,13 @@ async function checkBlacklists(force = false, host = null) {
                 if (!progress.in_progress && progress.current >= progress.total) {
                     clearInterval(progressInterval);
                     showToast('Blacklist check completed', 'success');
-                    // Remove progress bar
                     const temp = document.getElementById('blacklist-temp-progress');
                     if (temp) temp.remove();
 
-                    await loadBlacklistStatus(); // Refresh data!
+                    await loadBlacklistStatus();
                 }
             }
         } catch (e) {
-            // Ignore progress errors
         }
     }, 1000);
 
@@ -4091,13 +5518,21 @@ async function checkBlacklists(force = false, host = null) {
         if (force) params.set('force', 'true');
         if (host) params.set('host', host);
         const qs = params.toString();
-        const response = await authenticatedFetch(`/api/blacklist/check${qs ? '?' + qs : ''}`);
+        const response = await authenticatedFetch(`/api/blacklist/check${qs ? '?' + qs : ''}`, { method: 'POST' });
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw await responseError(response);
+        }
+        const body = await response.json().catch(() => null);
+        if (body && body.status === 'busy') {
+            showToast(body.message || 'A blocklist check is already running. Try again when it is done.', 'warning');
+            if (host) {
+                clearInterval(progressInterval);
+                const temp = document.getElementById('blacklist-temp-progress');
+                if (temp) temp.remove();
+            }
+            return;
         }
         if (host) {
-            // Single-host checks return the finished result directly - the
-            // all-hosts path returns immediately and the poller finishes up
             clearInterval(progressInterval);
             const temp = document.getElementById('blacklist-temp-progress');
             if (temp) temp.remove();
@@ -4110,17 +5545,11 @@ async function checkBlacklists(force = false, host = null) {
         if (temp) temp.remove();
 
         console.error('Failed to check blacklists:', error);
-        showToast(`Failed to check: ${error.message}`, 'error');
+        showToast(`Failed to check: ${uiErrorText(error)}`, 'error');
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = `
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                </svg>
-                Check Now
-            `;
+            btn.innerHTML = blacklistCheckBtnIdle;
         }
     }
 }
@@ -4129,94 +5558,48 @@ async function loadBlacklistStatus() {
     const container = document.getElementById('status-blacklist');
     if (!container) return;
 
-    // Skip refresh if details are expanded (to prevent closing)
-    // We check if any sub-details are open
-    const detailsElement = container.querySelector('details[open]');
-    if (detailsElement) {
-        // console.log('Skipping blacklist refresh: details are expanded');
-        // return;
-    }
-
     try {
         const response = await authenticatedFetch('/api/blacklist/monitored');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
         renderBlacklistStatus(data);
     } catch (error) {
         console.error('Failed to load blacklist status:', error);
-        container.innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
+        statusFailed(container, `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiSentence(uiErrorText(error)))}${uiRetryButton('loadBlacklistStatus()')}</p>`);
     }
 }
 
 
 async function loadDashboardBlacklistSummary() {
-    const container = document.getElementById('dashboard-blacklist-summary');
-    if (!container) return;
-
+    if (!document.getElementById('dash-kpi-blocklists')) return;
     try {
         const response = await authenticatedFetch('/api/blacklist/summary');
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         const data = await response.json();
-        console.log('Status summary data:', data);
-
         if (!data.has_data) {
-            container.innerHTML = `
-                <div class="text-center py-4">
-                    <p class="text-sm text-gray-500 dark:text-gray-400">No blacklist data yet</p>
-                    <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">The first check runs automatically</p>
-                </div>`;
+            setDashKpi('dash-kpi-blocklists', '-', '', 'No check yet; the first one runs by itself');
             return;
         }
-
-        const statusBadge = {
-            listed: '<span class="text-red-600 dark:text-red-400 font-semibold">&#10007; Listed</span>',
-            error: '<span class="text-yellow-600 dark:text-yellow-400 font-semibold">! Check Error</span>',
-            clean: '<span class="text-green-600 dark:text-green-400 font-semibold">&#10003; Clean</span>',
-            unknown: '<span class="text-gray-500 dark:text-gray-400 font-semibold">Unknown</span>'
-        }[data.status] || `<span class="text-gray-500 dark:text-gray-400">${escapeHtml(String(data.status))}</span>`;
-
-        const rows = [`
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-300">Status</span>
-                ${statusBadge}
-            </div>`];
-
-        if ((data.hosts_total || 0) > 1) {
-            rows.push(`
-                <div class="flex justify-between items-center">
-                    <span class="text-sm text-gray-600 dark:text-gray-300">Hosts Listed</span>
-                    <span class="text-sm font-medium text-gray-900 dark:text-white">${data.hosts_listed}/${data.hosts_total}</span>
-                </div>`);
+        const hosts = data.hosts || [];
+        const listedHosts = hosts.filter(h => h.status === 'listed');
+        const checked = data.checked_at ? `checked ${formatAgo(data.checked_at)}` : '';
+        const fig = data.figure && data.figure.valid ? data.figure : null;
+        if (data.status === 'listed') {
+            setDashKpi('dash-kpi-blocklists', fig ? `${fig.value} of ${fig.of} listed` : `${listedHosts.length || data.hosts_listed || 1} of ${hosts.length || 1} listed`, 'fail',
+                listedHosts.map(h => `${h.hostname} on ${h.listed_count} of ${h.total_blacklists || '?'}`).join(', '));
+        } else if (data.status === 'error') {
+            setDashKpi('dash-kpi-blocklists', 'Check error', 'warn', checked);
+        } else if (data.status === 'clean') {
+            setDashKpi('dash-kpi-blocklists', `${hosts.length || 1} clean`, '', [`${hosts.length} address${hosts.length === 1 ? '' : 'es'}`, checked].filter(Boolean).join(', '));
         } else {
-            const ip = (data.hosts && data.hosts[0] && data.hosts[0].hostname) || data.server_ip;
-            if (ip) {
-                rows.push(`
-                    <div class="flex justify-between items-center">
-                        <span class="text-sm text-gray-600 dark:text-gray-300">IP</span>
-                        <span class="text-sm font-mono text-gray-900 dark:text-white">${escapeHtml(ip)}</span>
-                    </div>`);
-            }
+            setDashKpi('dash-kpi-blocklists', 'Unknown', '', checked);
         }
-        rows.push(`
-            <div class="flex justify-between items-center">
-                <span class="text-sm text-gray-600 dark:text-gray-300">Listed On</span>
-                <span class="text-sm font-medium text-gray-900 dark:text-white">${data.listed_count}/${data.total_blacklists}</span>
-            </div>`);
-        if (data.checked_at) {
-            rows.push(`
-                <div class="flex justify-between items-center">
-                    <span class="text-sm text-gray-600 dark:text-gray-300">Last Check</span>
-                    <span class="text-xs text-gray-500 dark:text-gray-400">${escapeHtml(new Date(data.checked_at).toLocaleString())}</span>
-                </div>`);
-        }
-
-        container.innerHTML = `<div class="space-y-3">${rows.join('')}</div>`;
     } catch (error) {
         console.error('Failed to load blacklist summary:', error);
-        container.innerHTML = `<p class="text-gray-500 dark:text-gray-400 text-center text-sm">Error loading</p>`;
+        dashKpiFailed('dash-kpi-blocklists');
     }
 }
 
@@ -4226,201 +5609,174 @@ function renderBlacklistStatus(data) {
     if (!container) return;
 
     if (!data.hosts || data.hosts.length === 0) {
-        container.innerHTML = `
-            <div class="text-center py-8">
-                <svg class="w-12 h-12 mx-auto text-gray-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                </svg>
-                <h3 class="text-lg font-medium text-gray-900 dark:text-white">No Monitored Hosts</h3>
-                <p class="text-gray-500 dark:text-gray-400 mt-2">Syncing monitoring targets...</p>
+        setStatusKpi('status-kpi-blocklists', '-');
+        if (!statusHold(container)) container.innerHTML = `
+            <div class="ui-empty ui-panel">
+                <b>No Monitored Hosts</b>
+                <p>Syncing monitoring targets...</p>
             </div>
         `;
         return;
     }
 
-    // Preserve open states
+    const withData = data.hosts.filter(host => host.has_data);
+    const listed = withData.filter(host => (host.listed_count || 0) > 0).length;
+    setStatusKpi('status-kpi-blocklists', withData.length ? `${listed} of ${withData.length} listed` : '-', listed > 0 ? 'fail' : '');
+    setStatusTabCount('blocklists', listed, true);
+    statusState.blocklists = data.hosts;
+
+    const ignoredLists = new Map();
+    data.hosts.forEach(host => (host.results || []).forEach(r => { if (r.ignored && r.zone) ignoredLists.set(r.zone, r.name); }));
+    const blNote = document.getElementById('status-kpi-blocklists-note');
+    if (blNote) blNote.textContent = ignoredLists.size ? `${ignoredLists.size} list${ignoredLists.size === 1 ? '' : 's'} ignored for every address` : 'Addresses on a blocklist';
+    const blSummary = document.getElementById('status-blacklist-summary');
+    if (blSummary) blSummary.textContent = `${data.hosts.length} address${data.hosts.length === 1 ? '' : 'es'}${listed ? `, ${listed} listed` : ''}`;
+
+    const progress = document.getElementById('blacklist-temp-progress');
     const openStates = {};
     container.querySelectorAll('details').forEach(el => {
         if (el.open && el.id) openStates[el.id] = true;
     });
 
-    let html = '<div class="space-y-4">';
+    const RESULT_TONE = { clean: 'ok', listed: 'fail', error: 'warn', timeout: 'warn' };
+    const detail = r => r.response ? `${r.name}: ${r.response}` : r.name;
+    const lookupIcon = r => /^https:\/\//.test(r.info_url || '')
+        ? `<a href="${escapeHtml(r.info_url)}" target="_blank" rel="noopener noreferrer" class="ui-bl-link" title="Look up on ${escapeHtml(r.name)}" aria-label="Look up on ${escapeHtml(r.name)}"><svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg></a>`
+        : '';
+    const ignoreToggle = r => r.zone && r.zone !== 'unknown'
+        ? `<button type="button" class="ui-bl-ign" data-acts="status" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', ${!r.ignored})" title="${r.ignored ? 'Count and alert on this list again' : 'Keep checking this list but never count or alert on it'}">${r.ignored ? 'Stop ignoring' : 'Ignore'}</button>`
+        : '';
 
-    data.hosts.forEach((host, index) => {
-        const hostId = `host-${index}`;
-        const isOpen = openStates[hostId] || false;
-
-        let statusColor = 'gray';
-        let statusText = 'Unknown';
-        let statusIcon = '?';
-
-        if (host.status === 'clean') {
-            statusColor = 'green';
-            statusText = 'Clean';
-            statusIcon = '✓';
-        } else if (host.status === 'listed') {
-            statusColor = 'red';
-            statusText = 'Listed';
-            statusIcon = '✗';
-        } else if (host.status === 'error') {
-            statusColor = 'yellow';
-            statusText = 'Error';
-            statusIcon = '!';
-        }
-
-        const listedCount = host.listed_count || 0;
-        const totalCount = host.total_blacklists || 0;
-        const lastCheck = host.checked_at ? formatTime(host.checked_at) : 'Never';
-        const hostname = escapeHtml(host.hostname);
-        const source = escapeHtml(host.source || 'system');
-
-        // Host card
-        html += `
-            <details id="${hostId}" class="group bg-gray-50 dark:bg-gray-700/50 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden" ${isOpen ? 'open' : ''}>
-                <summary class="list-none px-4 py-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 transition flex items-center justify-between select-none">
-                    <div class="flex items-center gap-3">
-                        <div class="p-2 rounded-full bg-${statusColor}-100 dark:bg-${statusColor}-900/30 text-${statusColor}-600 dark:text-${statusColor}-400">
-                             <span class="font-bold text-lg w-5 h-5 flex items-center justify-center">${statusIcon}</span>
-                        </div>
-                        <div>
-                            <h3 class="font-semibold text-gray-900 dark:text-white flex items-center gap-2">
-                                ${hostname}
-                                <span class="text-xs px-2 py-0.5 rounded-full bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-300">${source}</span>
-                            </h3>
-                            <p class="text-xs text-gray-500 dark:text-gray-400">
-                                ${statusText} • Listed on ${listedCount}/${totalCount} • Last check: ${lastCheck}
-                            </p>
-                        </div>
-                    </div>
-                    <svg class="w-5 h-5 text-gray-400 transition-transform duration-200 group-open:rotate-180" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                    </svg>
-                </summary>
-                
-                <div class="px-4 pb-4 pt-1 border-t border-gray-200 dark:border-gray-700">
-        `;
-
-        if (host.has_data && host.results) {
-            html += '<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2 mb-4 max-h-96 overflow-y-auto custom-scrollbar p-1">';
-            host.results.forEach(result => {
-                let color = 'gray';
-                let icon = '?';
-
-                if (result.status === 'clean') {
-                    color = 'green';
-                    icon = '✓';
-                } else if (result.listed) {
-                    color = 'red';
-                    icon = '✗';
-                } else if (result.status === 'error') {
-                    color = 'yellow';
-                    icon = '!';
-                } else if (result.status === 'timeout') {
-                    color = 'orange';
-                    icon = '⏱';
-                }
-
-                // The raw DNS answer distinguishes a real listing (127.0.0.x)
-                // from resolver interference - surface it on hover
-                const detail = result.response
-                    ? `${result.name}: ${result.response}`
-                    : result.name;
-                html += `
-                    <div class="px-2 py-1.5 rounded bg-${color}-50 dark:bg-${color}-900/10 border border-${color}-100 dark:border-${color}-900/30 text-xs flex items-center justify-between group/item relative hover:bg-${color}-100 dark:hover:bg-${color}-900/20 transition cursor-default">
-                        <span class="font-medium text-${color}-700 dark:text-${color}-300 truncate mr-1" title="${escapeHtml(detail)}">${escapeHtml(result.name)}</span>
-                        <div class="flex items-center">
-                            <span class="text-${color}-600 dark:text-${color}-400 font-bold" title="${escapeHtml(detail)}">${icon}</span>
-                            ${result.info_url ? `<a href="${result.info_url}" target="_blank" class="ml-1 text-${color}-400 hover:text-${color}-600" title="View info"><svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"></path></svg></a>` : ''}
-                        </div>
-                    </div>
-                `;
-            });
-            html += '</div>';
-        }
-
-        html += `
-                    <div class="mt-2 text-center">
-                         <button onclick="checkHost('${hostname}')" class="text-sm text-blue-600 dark:text-blue-400 hover:underline">Run Check for this Host</button>
-                    </div>
+    if (!statusHold(container)) container.innerHTML = `
+        <div class="ui-st-hosts">
+        ${data.hosts.map(host => {
+            const hostId = `bl-host-${String(host.hostname).replace(/[^A-Za-z0-9_-]/g, '-')}`;
+            const results = host.results || [];
+            const listedOn = results.filter(r => r.listed && !r.ignored);
+            const others = results.filter(r => !(r.listed && !r.ignored));
+            const total = host.total_blacklists || 0;
+            const result = !host.has_data ? uiTag('Not checked yet', '')
+                : host.status === 'listed' ? uiTag(`Listed on ${host.listed_count || 0} of ${total}`, 'fail')
+                : host.status === 'error' ? uiTag('Check error', 'warn')
+                : host.status === 'clean' ? uiTag(`Clean on ${total}`, 'ok')
+                : uiTag('Unknown', '');
+            return `
+            <section class="ui-panel ui-bl-row">
+                <div class="ui-st-host-head">
+                    <b class="ui-mono">${uiEntity('ip', host.hostname, { mono: true, plain: true })}</b>
+                    <span class="ui-tag ui-tag-line">${escapeHtml(host.source || 'system')}</span>
+                    ${result}
+                    <span class="ui-st-host-tools">
+                        ${host.checked_at ? uiTime(host.checked_at, `checked ${formatAgo(host.checked_at)}`, { title: formatTime(host.checked_at), cls: 'ui-muted' }) : '<span class="ui-muted">never checked</span>'}
+                        <button onclick="checkHost('${escapeJsArg(host.hostname)}')" class="ui-btn ui-btn-sm" title="Run Check for this Host" data-acts="status">Check now</button>
+                    </span>
                 </div>
-            </details>
-        `;
-    });
+                ${listedOn.map(r => `
+                <div class="ui-st-listing">
+                    <div><b>${escapeHtml(r.name)}</b><small>${escapeHtml(r.response ? `Answer ${r.response}` : 'Listed')}</small></div>
+                    <span class="ui-st-acts">${blocklistLookupLink(r, 'Look up')}<button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(r.zone)}', true)" data-acts="status">Ignore list</button></span>
+                </div>`).join('')}
+                ${host.has_data && others.length ? `
+                <details id="${hostId}" class="ui-bl-all"${openStates[hostId] ? ' open' : ''}>
+                    <summary>${listedOn.length ? `${others.length} other lists` : `All ${others.length} lists`}</summary>
+                    <div class="ui-bl-grid">
+                        ${others.map(r => {
+                            const tone = r.ignored ? '' : (RESULT_TONE[r.status] || '');
+                            const state = r.listed ? 'listed, ignored' : (r.ignored ? 'ignored' : (r.status || 'unknown'));
+                            return `<span class="ui-bl-item${tone ? ` ui-bl-${tone}` : ''}${r.ignored ? ' is-ignored' : ''}" title="${escapeHtml(detail(r))}"><i class="ui-mdot${tone ? ` ui-mdot-${tone}` : ''}"></i>${escapeHtml(r.name)}${lookupIcon(r)}<small>${escapeHtml(state)}</small>${ignoreToggle(r)}</span>`;
+                        }).join('')}
+                    </div>
+                </details>` : ''}
+            </section>`;
+        }).join('')}
+        ${ignoredLists.size ? `
+            <section class="ui-panel">
+                <div class="ui-panel-head">Ignored lists <span class="ui-count">${ignoredLists.size}</span></div>
+                ${[...ignoredLists].map(([zone, name]) => `
+                <div class="ui-st-listing">
+                    <div><b>${escapeHtml(name)}</b><small>Checked and shown, never counted or alerted, for every address</small></div>
+                    <span class="ui-st-acts"><button type="button" class="ui-btn ui-btn-sm" onclick="setBlocklistIgnored('${escapeJsArg(zone)}', false)" data-acts="status">Stop ignoring</button></span>
+                </div>`).join('')}
+            </section>` : ''}
+        </div>
+    `;
+    if (progress) container.prepend(progress);
+    renderStatusAttention();
+}
 
-    html += '</div>';
-    container.innerHTML = html;
+async function setBlocklistIgnored(zone, ignored) {
+    if (!uiMayAct('status')) return;
+    try {
+        const res = await authenticatedFetch(`/api/blacklist/lists/${encodeURIComponent(zone)}/ignore`, {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ignored })
+        });
+        if (!res.ok) throw await responseError(res);
+        const data = await res.json();
+        showToast(ignored ? `${data.name} is ignored for every address.` : `${data.name} counts again.`, 'success');
+        loadBlacklistStatus();
+        loadNavCounters();
+    } catch (e) {
+        showToast(`Could not change the blocklist: ${uiErrorText(e)}`, 'error');
+    }
 }
 
 function renderStatusImport(imports) {
     const container = document.getElementById('status-import');
-    container.innerHTML = `
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            ${renderImportCard('Postfix Logs', imports.postfix, 'blue')}
-            ${renderImportCard('Rspamd Logs', imports.rspamd, 'purple')}
-            ${renderImportCard('Netfilter Logs', imports.netfilter, 'red')}
+    const row = (title, d) => `
+        <div class="ui-tr">
+            <b class="ui-td">${title}</b>
+            ${d ? `
+            <span class="ui-td"><small class="ui-sec-unit">Last Fetch Run </small>${d.last_fetch_run ? uiTime(d.last_fetch_run, formatAgo(d.last_fetch_run), { title: formatTime(d.last_fetch_run) }) : 'Never'}</span>
+            <span class="ui-td"><small class="ui-sec-unit">Last Import </small>${d.last_import ? uiTime(d.last_import, formatAgo(d.last_import), { title: formatTime(d.last_import) }) : 'Never'}</span>
+            <span class="ui-td ui-td-end"><small class="ui-sec-unit">Total Entries </small>${Number(d.total_entries || 0).toLocaleString()}</span>
+            <span class="ui-td"><small class="ui-sec-unit">Oldest Entry </small>${d.oldest_entry ? uiTime(d.oldest_entry, formatTime(d.oldest_entry)) : '-'}</span>
+            ` : '<span class="ui-td ui-muted">No data</span><span></span><span></span><span></span>'}
+        </div>`;
+    if (!statusHold(container)) container.innerHTML = `
+        <div class="ui-table ui-stack" data-nosort style="--ui-cols: minmax(130px, 1fr) minmax(110px, 1fr) minmax(110px, 1fr) 110px minmax(150px, 1.2fr); --ui-table-min: 660px">
+            <div class="ui-tr ui-tr-head"><span>Source</span><span>Last Fetch Run</span><span>Last Import</span><span class="ui-td-end">Total Entries</span><span>Oldest Entry</span></div>
+            ${row('Postfix Logs', imports.postfix)}
+            ${row('Rspamd Logs', imports.rspamd)}
+            ${row('Netfilter Logs', imports.netfilter)}
         </div>
     `;
 }
 
-function renderStatusCorrelation(correlation, incompleteList) {
+function renderStatusCorrelation(correlation, incompleteList, maxAgeMinutes) {
     const container = document.getElementById('status-correlation');
-    container.innerHTML = `
-        <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
-            <div class="p-4 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-900/20 dark:to-blue-800/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-blue-600 dark:text-blue-400">${correlation.total || 0}</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Total</p>
-            </div>
-            <div class="p-4 bg-gradient-to-br from-green-50 to-green-100 dark:from-green-900/20 dark:to-green-800/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-green-600 dark:text-green-400">${correlation.complete || 0}</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Complete</p>
-            </div>
-            <div class="p-4 bg-gradient-to-br from-yellow-50 to-yellow-100 dark:from-yellow-900/20 dark:to-yellow-800/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-yellow-600 dark:text-yellow-400">${correlation.incomplete || 0}</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Incomplete</p>
-            </div>
-            <div class="p-4 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-700/20 dark:to-gray-600/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-gray-500 dark:text-gray-400">${correlation.expired || 0}</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Expired</p>
-            </div>
-            <div class="p-4 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-900/20 dark:to-purple-800/20 rounded-lg text-center">
-                <p class="text-2xl font-bold text-purple-600 dark:text-purple-400">${correlation.completion_rate || 0}%</p>
-                <p class="text-xs text-gray-600 dark:text-gray-400 mt-1">Success Rate</p>
-            </div>
-        </div>
-        ${correlation.last_update ? `
-            <p class="text-sm text-gray-600 dark:text-gray-400 text-center">
-                Last updated: ${formatTime(correlation.last_update)}
-            </p>
-        ` : ''}
-        
-        ${incompleteList.length > 0 ? `
-            <div class="mt-4 p-4 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
-                <h4 class="text-sm font-semibold text-yellow-800 dark:text-yellow-300 mb-2">Recent Incomplete Correlations</h4>
-                <div class="space-y-2">
-                    ${incompleteList.map(item => `
-                        <div class="p-2 bg-white dark:bg-gray-800 rounded text-xs">
-                            <div class="flex justify-between items-start mb-1">
-                                <span class="font-mono text-gray-600 dark:text-gray-400">${copyableText(item.message_id || 'N/A')}</span>
-                                <span class="text-yellow-600 dark:text-yellow-400">${item.age_minutes}m ago</span>
-                            </div>
-                            <div class="text-gray-500 dark:text-gray-400">
-                                ${copyableText(item.sender || 'N/A')} => ${copyableText(item.recipient || 'N/A')}
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>
-                <p class="text-xs text-yellow-700 dark:text-yellow-400 mt-2">
-                    These will be automatically completed or expired within 1-2 minutes
-                </p>
-            </div>
-        ` : ''}
+    setStatusKpi('status-kpi-linking', `${correlation.completion_rate || 0}%`, correlation.incomplete ? 'warn' : '');
+    const linkingNote = document.getElementById('status-kpi-linking-note');
+    if (linkingNote) linkingNote.textContent = `${(correlation.complete || 0).toLocaleString()} of ${(correlation.total || 0).toLocaleString()} complete, ${(correlation.incomplete || 0).toLocaleString()} waiting`;
+    if (!statusHold(container)) container.innerHTML = `
+        <div class="ui-srv-big${correlation.incomplete ? ' ui-text-warn' : ''}">${escapeHtml(String(correlation.completion_rate || 0))}%</div>
+        <small>${Number(correlation.complete || 0).toLocaleString()} of ${Number(correlation.total || 0).toLocaleString()} complete, ${Number(correlation.incomplete || 0).toLocaleString()} incomplete, ${Number(correlation.expired || 0).toLocaleString()} expired</small>
+        ${correlation.last_update ? `<small title="${escapeHtml(formatTime(correlation.last_update))}">Updated ${formatAgo(correlation.last_update)}</small>` : ''}
     `;
+    const pending = document.getElementById('status-correlation-pending');
+    if (pending) pending.innerHTML = incompleteList.length > 0 ? `
+        <section class="ui-sec-block">
+            <div class="ui-list-head" id="status-pending-head"><h2 class="ui-h2">Waiting to be linked</h2> <span class="ui-count">${incompleteList.length}</span></div>
+            <div class="ui-table ui-stack" data-sort-at="status-pending-head" data-sort-name="messages waiting to be linked" style="--ui-cols: minmax(180px, 1.4fr) minmax(220px, 2fr) 90px; --ui-table-min: 560px">
+                <div class="ui-tr ui-tr-head"><span data-sort-kind="text">Message ID</span><span data-sort-kind="text">From and to</span><span class="ui-td-end" data-sort-kind="date">Age</span></div>
+                ${incompleteList.map(item => `
+                    <div class="ui-tr">
+                        <span class="ui-td ui-mono">${copyableText(item.message_id || 'N/A')}</span>
+                        <span class="ui-td">${uiEntity('address', item.sender || 'N/A')} → ${uiEntity('address', item.recipient || 'N/A')}</span>
+                        <span class="ui-td ui-td-end ui-text-warn">${escapeHtml(String(item.age_minutes))}m ago</span>
+                    </div>`).join('')}
+            </div>
+            <p class="ui-kv-note ui-list-foot">Each is linked when its delivery logs arrive, or marked expired once it is ${escapeHtml(String(maxAgeMinutes || 10))} minutes old.</p>
+        </section>` : '';
 }
 
 function renderStatusJobs(jobs) {
     const container = document.getElementById('status-jobs');
-    
-    const categories = [
+    const categories = statusJobCategories(jobs);
+    renderStatusJobsTable(container, categories, jobs);
+}
+
+function statusJobCategories(jobs) {
+    return [
         {
             title: 'Log Processing',
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"></path>',
@@ -4446,15 +5802,17 @@ function renderStatusJobs(jobs) {
                 ['Sync Active Domains', 'sync_local_domains', jobs.sync_local_domains],
                 ['Mailbox Statistics', 'mailbox_stats', jobs.mailbox_stats],
                 ['Alias Statistics', 'alias_stats', jobs.alias_stats],
-                ['Sync Transports & Relayhosts', 'sync_transports', jobs.sync_transports]
+                ['Sync Transports & Relayhosts', 'sync_transports', jobs.sync_transports],
+                ['Turned-Off Features', 'feature_data_sweep', jobs.feature_data_sweep],
+                ['Trend Samples', 'trend_samples', jobs.trend_samples]
             ]
         },
         {
-            title: 'DMARC & Reports',
+            title: 'DMARC & TLS',
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>',
             jobs: [
-                ['DMARC IMAP Import', 'dmarc_imap_sync', jobs.dmarc_imap_sync],
-                ['Cleanup DMARC Reports', 'cleanup_dmarc_reports', jobs.cleanup_dmarc_reports],
+                ['DMARC & TLS IMAP Import', 'dmarc_imap_sync', jobs.dmarc_imap_sync],
+                ['Cleanup DMARC & TLS Reports', 'cleanup_dmarc_reports', jobs.cleanup_dmarc_reports],
                 ['Weekly Summary Report', 'send_weekly_summary', jobs.send_weekly_summary]
             ]
         },
@@ -4463,7 +5821,10 @@ function renderStatusJobs(jobs) {
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>',
             jobs: [
                 ['DNS Check (All Domains)', 'dns_check', jobs.dns_check],
-                ['IP Blacklist Check (All Hosts)', 'blacklist_check', jobs.blacklist_check]
+                ['IP Blacklist Check (All Hosts)', 'blacklist_check', jobs.blacklist_check],
+                ['Protection Rules', 'protection_rules', jobs.protection_rules],
+                ['Anomaly Detection', 'anomaly_detection', jobs.anomaly_detection],
+                ['Outgoing Spam', 'smtp_abuse', jobs.smtp_abuse]
             ]
         },
         {
@@ -4471,6 +5832,7 @@ function renderStatusJobs(jobs) {
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>',
             jobs: [
                 ['Check App Version', 'check_app_version', jobs.check_app_version],
+                ['Credential Checks', 'check_credentials', jobs.check_credentials],
                 ['Update MaxMind Databases', 'update_geoip', jobs.update_geoip]
             ]
         },
@@ -4483,11 +5845,19 @@ function renderStatusJobs(jobs) {
             ]
         },
         {
-            title: 'Spam Filter',
+            title: 'Devices',
+            icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"></path>',
+            jobs: [
+                ['ActiveSync Devices', 'eas_devices', jobs.eas_devices],
+                ['Cleanup ActiveSync Devices', 'cleanup_eas_devices', jobs.cleanup_eas_devices]
+            ]
+        },
+        {
+            title: 'Outbound',
             icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>',
             jobs: [
                 ['Detect Suppressions', 'detect_suppressions', jobs.detect_suppressions],
-                ['Sync to Rspamd', 'sync_suppressions', jobs.sync_suppressions],
+                ['Sync with Rspamd', 'sync_suppressions', jobs.sync_suppressions],
                 ['Expire Suppressions', 'expire_suppressions', jobs.expire_suppressions],
                 ['Cleanup Deferred Queue', 'cleanup_deferred_queue', jobs.cleanup_deferred_queue]
             ]
@@ -4500,75 +5870,101 @@ function renderStatusJobs(jobs) {
             ]
         }
     ];
-    
+}
+
+function renderStatusJobsTable(container, categories, jobs) {
+    const summary = summarizeJobs(jobs);
+    const all = summary.all;
+    const isOff = summary.isOff;
+    statusState.jobs = all.map(([name, key, job]) => ({ name, key, failed: !isOff(job) && job.status === 'failed', error: job.error || '' }));
+    const failed = summary.failed.length;
+    const off = summary.off;
+    setStatusKpi('status-kpi-jobs', `${all.length - failed - off} of ${all.length - off} healthy`, failed ? 'fail' : '');
+    const jobsNote = [failed ? `${failed} failed` : 'None failed', off ? `${off} off because a feature or setting is off` : ''].filter(Boolean).join(', ');
+    const kpiNote = document.getElementById('status-kpi-jobs-note');
+    if (kpiNote) kpiNote.textContent = jobsNote;
+    const jobsSummary = document.getElementById('status-jobs-summary');
+    if (jobsSummary) jobsSummary.textContent = `${all.length} jobs, ${jobsNote.charAt(0).toLowerCase()}${jobsNote.slice(1)}`;
+    setStatusTabCount('jobs', failed, true);
+
+    const isFailed = job => !isOff(job) && job.status === 'failed';
+    const chevron = '<svg class="ui-collapse-chevron" width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>';
     let html = '';
     for (const cat of categories) {
-        // Skip categories where no jobs exist
         const validJobs = cat.jobs.filter(j => j[2]);
         if (validJobs.length === 0) continue;
-        
+        const catFailed = validJobs.filter(j => isFailed(j[2])).length;
+        const catOff = validJobs.filter(j => isOff(j[2])).length;
+        const note = [catFailed ? `<span class="ui-text-fail">${catFailed} failed</span>` : 'all OK', catOff ? `${catOff} off` : ''].filter(Boolean).join(' · ');
+        const open = catFailed > 0 || statusJobsOpen.has(cat.title);
         html += `
-            <div class="mb-6">
-                <div class="flex items-center gap-2 mb-3">
-                    <svg class="w-4 h-4 text-gray-400 dark:text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">${cat.icon}</svg>
-                    <h4 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">${cat.title}</h4>
-                </div>
-                <div class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3">
-                    ${cat.jobs.map(j => renderJobCard(j[0], j[1], j[2])).join('')}
-                </div>
-            </div>`;
+            <details class="ui-panel ui-collapse ui-jg" data-group="${escapeHtml(cat.title)}"${catFailed ? ' data-failed' : ''}${open ? ' open' : ''} ontoggle="statusJobGroupToggled(this)">
+                <summary class="ui-panel-head">${escapeHtml(cat.title)} <span class="ui-count">${validJobs.length} ${validJobs.length === 1 ? 'job' : 'jobs'} · ${note}</span>${chevron}</summary>
+                <div class="ui-jg-body">${validJobs.map(j => renderJobCard(j[0], j[1], j[2])).join('')}</div>
+            </details>`;
     }
-    container.innerHTML = html;
+    if (!statusHold(container)) container.innerHTML = `<div class="ui-jgs">${html}</div>`;
+    statusJobFilter(statusJobFilterValue);
+    renderStatusAttention();
+}
+
+const statusJobsOpen = new Set();
+function statusJobGroupToggled(el) {
+    if (statusJobFilterValue !== 'all') return;
+    if (el.open) statusJobsOpen.add(el.dataset.group); else statusJobsOpen.delete(el.dataset.group);
 }
 
 async function triggerBackgroundJob(jobKey, buttonEl, jobName = null) {
     if (!buttonEl) return;
 
-    // Use jobName if provided, otherwise fallback to jobKey
-    const displayName = jobName || jobKey;
-
-    // Disable button and show loading
     buttonEl.disabled = true;
     const originalContent = buttonEl.innerHTML;
-    // Keep width to prevent layout shift if possible, or just standard loading state
     buttonEl.innerHTML = '<span class="inline-block animate-spin w-3 h-3 border-2 border-current border-t-transparent rounded-full"></span> Running...';
     buttonEl.classList.add('opacity-50', 'cursor-not-allowed');
 
     try {
-        const response = await authenticatedFetch(`/api/settings/jobs/${jobKey}/run`, {
-            method: 'POST'
-        });
-
-        if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.detail || `HTTP ${response.status}`);
-        }
-
-        showToast(`Job "${displayName}" started successfully`, 'success');
-
-        // Refresh the status page after a short delay
-        setTimeout(() => {
-            loadStatusExtended();
-        }, 1000);
-
-    } catch (error) {
-        if (error.message.includes('409')) {
-            showToast(`Job "${displayName}" is already running`, 'warning');
-        } else {
-            console.error(`Failed to trigger job ${jobKey}:`, error); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
-            showToast(`Failed to start job: ${error.message}`, 'error');
-        }
+        await runBackgroundJob(jobKey, jobName);
     } finally {
-        // Re-enable button
         buttonEl.disabled = false;
         buttonEl.innerHTML = originalContent;
         buttonEl.classList.remove('opacity-50', 'cursor-not-allowed');
     }
 }
 
-// =============================================================================
-// POSTFIX DETAILS MODAL
-// =============================================================================
+async function runBackgroundJob(jobKey, jobName = null) {
+    if (!uiMayAct('admin')) return;
+    const displayName = jobName || jobKey;
+    try {
+        const response = await authenticatedFetch(`/api/settings/jobs/${encodeURIComponent(jobKey)}/run`, {
+            method: 'POST'
+        });
+
+        if (!response.ok) {
+            const err = await response.json().catch(() => null);
+            const detail = uiHttpErrorText(response.status, err);
+            if (response.status === 409 && /already running/i.test(detail)) {
+                showToast(`Job "${displayName}" is already running`, 'warning');
+                return 'running';
+            }
+            if (response.status === 409) {
+                showToast(`Job "${displayName}" cannot run now. ${detail.replace(/^The job cannot run\.\s*/, '')}`.trim(), 'warning');
+                return 'unavailable';
+            }
+            throw new Error(detail);
+        }
+
+        showToast(`Job "${displayName}" started successfully`, 'success');
+
+        setTimeout(() => {
+            loadStatusExtended();
+        }, 1000);
+        return 'started';
+    } catch (error) {
+        console.error(`Failed to trigger job ${jobKey}:`, error); // nosemgrep: javascript.lang.security.audit.unsafe-formatstring.unsafe-formatstring
+        showToast(`Failed to start job: ${uiErrorText(error)}`, 'error');
+        return 'failed';
+    }
+}
 
 function showChangelogModal(changelog) {
     const modal = document.getElementById('changelog-modal');
@@ -4588,9 +5984,16 @@ function showChangelogModal(changelog) {
         } else {
             content.textContent = changelog || 'No changelog available';
         }
-        modal.classList.remove('hidden');
-        document.body.style.overflow = 'hidden';
+        revealChangelogModal(modal);
     }
+}
+
+function revealChangelogModal(modal) {
+    modal.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+    const body = modal.querySelector('.ui-dialog-body');
+    if (body) body.scrollTop = 0;
+    uiReadProgress(modal.querySelector('.ui-dialog-head'), body);
 }
 
 function closeChangelogModal() {
@@ -4605,12 +6008,8 @@ function closeChangelogModal() {
     }
 }
 
-// =============================================================================
-// GEOIP RENDERING AND FLAGS
-// =============================================================================
-
 function getFlagUrl(countryCode, size = '24x18') {
-    if (!countryCode || countryCode.length !== 2) {
+    if (typeof countryCode !== 'string' || !/^[a-z]{2}$/i.test(countryCode)) {
         return null;
     }
     return `/static/assets/flags/${size}/${countryCode.toLowerCase()}.png`;
@@ -4631,11 +6030,9 @@ function renderGeoIPInfo(rspamdData, size = '24x18') {
     const flagUrl = getFlagUrl(rspamdData.country_code, size);
     const [width, height] = size.split('x').map(Number);
 
-    // Use a list to store the parts of the info string
     let parts = [`<strong>${copyableText(ip)}</strong>`];
 
     if (rspamdData.country_name && flagUrl) {
-        // Wrap image and country name in a span to keep them together and aligned
         const countryPart =
             `<br><span style="display: inline-flex; align-items: baseline; gap: 4px; vertical-align: baseline; margin-top: 5px;">` +
             `<img src="${flagUrl}" alt="${escapeHtml(rspamdData.country_name)}" ` +
@@ -4654,7 +6051,6 @@ function renderGeoIPInfo(rspamdData, size = '24x18') {
         parts.push(`(${escapeHtml(rspamdData.asn_org)})`);
     }
 
-    // Use white-space: nowrap on the container if you want to prevent the whole line from breaking
     return `<p style="margin: 0;">Source: ${parts.join(' ')}</p>`;
 }
 
@@ -4670,11 +6066,9 @@ function renderGeoIPForDMARC(record, size = '24x18') {
         return escapeHtml(ip);
     }
 
-    // Build flag URL
     const flagUrl = getFlagUrl(record.country_code, size);
     const [width, height] = size.split('x').map(Number);
 
-    // Build location string
     let parts = [];
 
     if (record.country_name) {
@@ -4691,29 +6085,24 @@ function renderGeoIPForDMARC(record, size = '24x18') {
 
     const locationText = parts.join(', ');
 
-    // Return flag + location inline
     if (flagUrl && locationText) {
-        return `<img src="${flagUrl}" alt="${escapeHtml(record.country_name || '')}" style="width:${width}px; height:${height}px; vertical-align:middle; margin-right:4px;" onerror="this.style.display='none'">${locationText}`;
+        return `<img src="${flagUrl}" alt="${escapeHtml(record.country_name || '')}" style="width:${width}px; height:${height}px; vertical-align:middle; margin-inline-end:4px;" onerror="this.style.display='none'">${locationText}`;
     }
 
     return locationText || escapeHtml(ip);
 }
 
 
-// =============================================================================
-// PAGINATION & HELPER FUNCTIONS
-// =============================================================================
-
 function renderPagination(type, currentPage, totalPages) {
     if (totalPages <= 1) return '';
 
     return `
-        <div class="flex flex-col sm:flex-row justify-center items-center gap-2 sm:gap-3 mt-6">
-            <button onclick="loadLogs('${type}', ${currentPage - 1})" ${currentPage === 1 ? 'disabled' : ''} class="w-full sm:w-auto px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition">
+        <div class="ui-pagination">
+            <button onclick="loadLogs('${type}', ${Number(currentPage) - 1})" ${currentPage === 1 ? 'disabled' : ''} class="ui-btn">
                 Previous
             </button>
-            <span class="text-sm text-gray-600 dark:text-gray-400">Page ${currentPage} of ${totalPages}</span>
-            <button onclick="loadLogs('${type}', ${currentPage + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="w-full sm:w-auto px-4 py-2 bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-600 disabled:opacity-50 disabled:cursor-not-allowed transition">
+            <span class="ui-muted">Page ${Number(currentPage)} of ${Number(totalPages)}</span>
+            <button onclick="loadLogs('${type}', ${Number(currentPage) + 1})" ${currentPage === totalPages ? 'disabled' : ''} class="ui-btn">
                 Next
             </button>
         </div>
@@ -4724,17 +6113,13 @@ function loadLogs(type, page) {
     currentPage[type] = page;
     switch (type) {
         case 'messages':
-            loadMessages(page);
+            loadMessages();
             break;
         case 'netfilter':
             loadNetfilterLogs(page);
             break;
     }
 }
-
-// =============================================================================
-// DARK MODE
-// =============================================================================
 
 function initDarkMode() {
     const theme = localStorage.getItem('theme');
@@ -4758,29 +6143,13 @@ function toggleDarkMode() {
     document.getElementById('theme-toggle-light-icon').classList.toggle('hidden');
 }
 
-// Initialize dark mode
 initDarkMode();
 
-// =============================================================================
-// MODAL EVENT LISTENERS
-// =============================================================================
-
 document.addEventListener('DOMContentLoaded', function () {
-    // ESC key to close modal
-    document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') {
-            const changelogModal = document.getElementById('changelog-modal');
-            if (changelogModal && !changelogModal.classList.contains('hidden')) {
-                closeChangelogModal();
-            }
-        }
-    });
-
-    // Changelog modal event listeners
     const changelogModal = document.getElementById('changelog-modal');
     if (changelogModal) {
         changelogModal.addEventListener('click', function (e) {
-            if (e.target.id === 'changelog-modal') {
+            if (uiBackdropClick(e)) {
                 closeChangelogModal();
             }
         });
@@ -4794,23 +6163,53 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 
-// =============================================================================
-// HELP DOCUMENTATION MODAL
-// =============================================================================
+const DOCS_SITE_URL = 'https://shlomiporush.github.io/mailcow-logs-viewer/';
+const DOCS_REPO_URL = 'https://github.com/ShlomiPorush/mailcow-logs-viewer/blob/main/';
 
-async function showHelpModal(docName) {
+function helpDocMarkdown(markdown, docName) {
+    return markdown
+        .replace(/^[ \t]*!\[[^\]]*\]\([^)\s]*\)[ \t]*$/gm, '')
+        .replace(/(\]\()([^)\s]+)(\))/g, (match, open, target, close) => {
+            if (/^[a-z][a-z0-9+.-]*:/i.test(target)) return match;
+            if (target.startsWith('#')) return `${open}${DOCS_SITE_URL}HelpDocs/${docName}/${target}${close}`;
+            const [path, anchor] = target.split('#');
+            const hash = anchor ? `#${anchor}` : '';
+            const parts = ['documentation', 'HelpDocs'];
+            for (const segment of path.split('/')) {
+                if (segment === '..') parts.pop();
+                else if (segment && segment !== '.') parts.push(segment);
+            }
+            const file = parts.join('/');
+            let url;
+            if (file === 'README.md') url = DOCS_SITE_URL;
+            else if (file === 'CHANGELOG.md') url = `${DOCS_SITE_URL}changelog/`;
+            else if (file.startsWith('documentation/') && file.endsWith('.md')) {
+                url = `${DOCS_SITE_URL}${file.slice('documentation/'.length, -'.md'.length)}/`;
+            } else url = DOCS_REPO_URL + file;
+            return `${open}${url}${hash}${close}`;
+        });
+}
+
+async function showHelpModal(docName, title) {
+    const opener = layerLastAction || document.activeElement;
     try {
         const response = await authenticatedFetch(`/api/docs/${docName}`);
 
         if (!response.ok) {
-            throw new Error(`Failed to load documentation: ${response.statusText}`);
+            throw await responseError(response);
         }
 
-        const markdown = await response.text();
-        showMarkdownModal(`Help - ${docName}`, markdown);
+        const markdown = helpDocMarkdown(await response.text(), docName);
+        uiLayerOpener(opener);
+        showMarkdownModal(`Help - ${title || docName.replace(/_/g, ' ')}`, markdown);
 
     } catch (error) {
         console.error('Failed to load help documentation:', error);
+        if (uiIsPhone()) {
+            uiSheetShow('markdown-sheet', { label: 'Help', head: '<h3 class="ui-sheet-title">Help</h3>',
+                body: `<p class="ui-text-fail">Failed to load help documentation: ${escapeHtml(uiErrorText(error))}</p>` });
+            return;
+        }
 
         const modal = document.getElementById('changelog-modal');
         const modalTitle = modal?.querySelector('h3');
@@ -4820,29 +6219,27 @@ async function showHelpModal(docName) {
             if (modalTitle) {
                 modalTitle.textContent = 'Help';
             }
-            content.innerHTML = '<p class="text-red-500">Failed to load help documentation. Please try again later.</p>';
-            modal.classList.remove('hidden');
-            document.body.style.overflow = 'hidden';
+            content.innerHTML = `<p class="text-red-500">Failed to load help documentation: ${escapeHtml(uiErrorText(error))}</p>`;
+            revealChangelogModal(modal);
         }
     }
 }
-
-// =============================================================================
-// CONSOLE LOG
-// =============================================================================
 
 console.log('[OK] mailcow Logs Viewer - Complete Frontend Loaded');
 console.log('Features: Dashboard, Messages, Postfix, Rspamd, Netfilter, Queue, Quarantine, Status, Mailbox Stats, Settings');
 console.log('UI: Dark mode, Modals with tabs, Responsive design');
 
-// =============================================================================
-// CONTAINER LOGS MODAL
-// =============================================================================
-
 let containerLogsInterval = null;
+
+function containerLogsAtEnd(content) {
+    const box = content.parentElement;
+    return !box || box.scrollHeight - box.scrollTop - box.clientHeight <= 4;
+}
 
 async function fetchContainerLogs(silent = false) {
     const content = document.getElementById('container-logs-content');
+
+    if (content && silent && (uiTextHeld(content) || !containerLogsAtEnd(content) || document.hidden)) return;
 
     if (content && !silent) {
         content.textContent = 'Loading logs...';
@@ -4851,23 +6248,26 @@ async function fetchContainerLogs(silent = false) {
     try {
         const response = await authenticatedFetch('/api/status/container-logs?lines=500');
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw await responseError(response);
         }
 
         const data = await response.json();
 
         if (content && data.logs) {
-            const isScrolledToBottom = content.parentElement
-                ? (content.parentElement.scrollHeight - content.parentElement.scrollTop === content.parentElement.clientHeight)
-                : true;
+            if (silent && (uiTextHeld(content) || !containerLogsAtEnd(content))) return;
+            const isScrolledToBottom = containerLogsAtEnd(content);
 
             if (data.logs.length === 0) {
                 if (!silent) content.textContent = 'No logs available.';
             } else {
-                content.textContent = data.logs.join('');
+                content.replaceChildren(...data.logs.join('').replace(/\r?\n$/, '').split(/\r?\n/).map(text => {
+                    const line = document.createElement('span');
+                    line.className = 'ui-log-line';
+                    line.textContent = text;
+                    return line;
+                }));
             }
 
-            // Auto-scroll to bottom if it was already at bottom or if it's the first load
             if (!silent || isScrolledToBottom) {
                 const container = content.parentElement;
                 if (container) {
@@ -4878,7 +6278,7 @@ async function fetchContainerLogs(silent = false) {
     } catch (error) {
         console.error('Failed to load container logs:', error);
         if (content && !silent) {
-            content.textContent = `Failed to load logs: ${error.message}`;
+            content.textContent = `Failed to load logs: ${uiErrorText(error)}`;
         }
     }
 }
@@ -4891,16 +6291,17 @@ function loadContainerLogs() {
         document.body.style.overflow = 'hidden';
     }
 
-    // Initial load
-    fetchContainerLogs(false);
-
-    // Clear existing interval just in case
     if (containerLogsInterval) clearInterval(containerLogsInterval);
 
-    // Set auto-refresh every 2 seconds
-    containerLogsInterval = setInterval(() => {
-        fetchContainerLogs(true);
-    }, 2000);
+    requestAnimationFrame(() => {
+        if (modal && modal.classList.contains('hidden')) return;
+        if (modal) uiDialogSheetFull(modal);
+        fetchContainerLogs(false);
+        if (containerLogsInterval) clearInterval(containerLogsInterval);
+        containerLogsInterval = setInterval(() => {
+            fetchContainerLogs(true);
+        }, 2000);
+    });
 }
 
 function closeContainerLogsModal() {
@@ -4910,13 +6311,126 @@ function closeContainerLogsModal() {
         document.body.style.overflow = '';
     }
 
-    // Stop auto-refresh
     if (containerLogsInterval) {
         clearInterval(containerLogsInterval);
         containerLogsInterval = null;
     }
 }
 
-function loadMailboxStatsPage(page) {
-    loadMailboxStatsList(page);
+const NAV_SUBPAGE_TABS = {
+    quarantine: '#quarantine-tabs:not(.hidden)',
+    outbound: '#outbound-tabs:not(.hidden)',
+    netfilter: '.ui-se-tabs',
+    status: '.ui-st-tabs',
+    'mailbox-stats': '#mailbox-stats-views'
+};
+let navFlyout = null;
+let navFlyoutTimer = null;
+
+function navSubpageTabs(page) {
+    const list = document.querySelector(NAV_SUBPAGE_TABS[page]);
+    if (!list) return [];
+    return [...list.querySelectorAll('[role="tab"]')].filter(btn => !btn.hidden && !btn.classList.contains('hidden') && btn.style.display !== 'none');
 }
+
+function hideNavFlyout() {
+    clearTimeout(navFlyoutTimer);
+    if (navFlyout) navFlyout.classList.remove('is-open');
+}
+
+function showNavFlyout(item, page) {
+    clearTimeout(navFlyoutTimer);
+    const tabs = navSubpageTabs(page);
+    if (tabs.length < 2) return hideNavFlyout();
+    if (!navFlyout) {
+        navFlyout = document.createElement('div');
+        navFlyout.className = 'ui-fly';
+        navFlyout.setAttribute('role', 'menu');
+        navFlyout.addEventListener('mouseenter', () => clearTimeout(navFlyoutTimer));
+        navFlyout.addEventListener('mouseleave', () => { navFlyoutTimer = setTimeout(hideNavFlyout, 150); });
+        navFlyout.addEventListener('keydown', e => {
+            const items = [...navFlyout.querySelectorAll('.ui-fly-item')];
+            const i = items.indexOf(document.activeElement);
+            if (e.key === 'ArrowDown') { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+            if (e.key === 'ArrowUp') { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+            const back = getComputedStyle(navFlyout).direction === 'rtl' ? 'ArrowRight' : 'ArrowLeft';
+            if (e.key === 'Escape' || e.key === back) { e.preventDefault(); hideNavFlyout(); navFlyout.owner && navFlyout.owner.focus(); }
+        });
+        navFlyout.addEventListener('focusout', e => { if (!navFlyout.contains(e.relatedTarget)) hideNavFlyout(); });
+        document.body.appendChild(navFlyout);
+    }
+    const onPage = item.getAttribute('aria-current') === 'page';
+    const label = item.querySelector('.ui-nav-label');
+    navFlyout.owner = item;
+    navFlyout.innerHTML = `<div class="ui-fly-title">${escapeHtml(label ? label.textContent : page)}</div>` + tabs.map((btn, i) => {
+        const copy = btn.cloneNode(true);
+        const count = copy.querySelector('.ui-tab-n');
+        const countText = count && !count.classList.contains('hidden') ? count.textContent.trim() : '';
+        if (count) count.remove();
+        const on = onPage && (btn.classList.contains('active') || btn.getAttribute('aria-selected') === 'true');
+        return `<button type="button" role="menuitem" class="ui-fly-item${on ? ' is-on' : ''}" data-i="${i}">
+            <span>${copy.innerHTML.trim()}</span>${countText ? `<small class="ui-nav-count${count.classList.contains('is-fail') ? ' is-fail' : ''}">${escapeHtml(countText)}</small>` : ''}</button>`;
+    }).join('');
+    navFlyout.querySelectorAll('.ui-fly-item').forEach(el => el.addEventListener('click', () => {
+        tabs[Number(el.dataset.i)].click();
+        hideNavFlyout();
+        if (currentTab !== page) navigateTo(page);
+    }));
+    const rect = item.getBoundingClientRect();
+    navFlyout.style.top = `${Math.max(8, Math.min(rect.top - 6, window.innerHeight - navFlyout.offsetHeight - 8))}px`;
+    const rtl = getComputedStyle(item).direction === 'rtl';
+    navFlyout.style.left = `${rtl ? rect.left - navFlyout.offsetWidth - 8 : rect.right + 8}px`;
+    navFlyout.classList.add('is-open');
+    navFlyout.style.top = `${Math.max(8, Math.min(rect.top - 6, window.innerHeight - navFlyout.offsetHeight - 8))}px`;
+}
+
+function initNavFlyouts() {
+    Object.keys(NAV_SUBPAGE_TABS).forEach(page => {
+        const item = document.getElementById(`tab-${page}`);
+        if (!item) return;
+        item.classList.toggle('has-sub', navSubpageTabs(page).length > 1);
+        item.setAttribute('aria-haspopup', 'menu');
+        item.addEventListener('mouseenter', () => showNavFlyout(item, page));
+        item.addEventListener('mouseleave', () => { navFlyoutTimer = setTimeout(hideNavFlyout, 150); });
+        item.addEventListener('focus', () => showNavFlyout(item, page));
+        item.addEventListener('blur', e => { if (!navFlyout || !navFlyout.contains(e.relatedTarget)) navFlyoutTimer = setTimeout(hideNavFlyout, 150); });
+        item.addEventListener('click', hideNavFlyout);
+        item.addEventListener('keydown', e => {
+            if (e.key !== 'ArrowRight') return;
+            e.preventDefault();
+            showNavFlyout(item, page);
+            const first = navFlyout && navFlyout.querySelector('.ui-fly-item');
+            if (first) first.focus();
+        });
+    });
+    window.addEventListener('resize', hideNavFlyout);
+}
+document.addEventListener('DOMContentLoaded', initNavFlyouts);
+
+function resetWindowPan() {
+    const el = document.activeElement;
+    const editing = el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+    if (editing) return;
+    if (window.scrollX || window.scrollY || document.scrollingElement.scrollTop) window.scrollTo(0, 0);
+}
+window.addEventListener('scroll', resetWindowPan, { passive: true });
+document.addEventListener('focusout', () => setTimeout(resetWindowPan, 300));
+if (window.visualViewport) window.visualViewport.addEventListener('resize', () => setTimeout(resetWindowPan, 100));
+
+function syncNavToggle() {
+    const collapsed = document.documentElement.classList.contains('ui-nav-collapsed');
+    const btn = document.getElementById('ui-nav-toggle');
+    if (!btn) return;
+    const label = collapsed ? 'Expand menu' : 'Collapse menu';
+    btn.setAttribute('aria-label', label);
+    btn.title = label;
+    btn.setAttribute('aria-expanded', String(!collapsed));
+}
+
+function toggleNavCollapsed() {
+    const collapsed = document.documentElement.classList.toggle('ui-nav-collapsed');
+    try { localStorage.setItem('navCollapsed', collapsed ? '1' : '0'); } catch (e) {}
+    if (typeof hideNavFlyout === 'function') hideNavFlyout();
+    syncNavToggle();
+}
+document.addEventListener('DOMContentLoaded', syncNavToggle);

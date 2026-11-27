@@ -1,27 +1,3 @@
-// =============================================================================
-// RATE LIMITS - who is hitting mailcow's sender rate limits, and the limits
-// =============================================================================
-// Classic script sharing the global scope; loaded after utils.js and app.js
-// in index.html.
-//
-// This is a view of the Mailbox Stats page, not a page of its own. The view
-// switcher lives in mailbox-stats.js. One scrolling page, three cards:
-// activity over time, the blocked senders (master-detail), and the configured
-// limits of every mailbox and domain in one table.
-//
-// Two things here are easy to confuse:
-//   the LIMIT is configuration - so many messages per time frame
-//   the COUNTER is what a blocked sender is stuck behind right now; releasing
-//   it lets them send again without changing their limit
-
-// Neutral badge following the APP_COLORS formula in utils.js: soft fill,
-// subtle border, readable in both themes.
-const RATE_LIMIT_NEUTRAL_BADGE =
-    'bg-gray-100 dark:bg-gray-500/10 text-gray-700 dark:text-gray-300 border border-gray-200 dark:border-gray-500/20';
-
-// Badge shape used across the app for status and direction chips
-const RATE_LIMIT_BADGE_SHAPE = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-medium';
-
 const RATE_LIMIT_FRAME_LABELS = {
     s: 'second',
     m: 'minute',
@@ -29,42 +5,23 @@ const RATE_LIMIT_FRAME_LABELS = {
     d: 'day'
 };
 
-// Chips of the configured limits table
-const RATE_LIMIT_CHIP_SHAPE = 'px-2.5 py-1 text-xs font-medium rounded-full border transition-colors';
-const RATE_LIMIT_CHIP_ACTIVE = 'bg-blue-500 border-blue-500 text-white';
-const RATE_LIMIT_CHIP_INACTIVE =
-    'border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20';
 
-// Edit, Cancel and Apply to filtered share one recipe so the action column
-// never changes size, and text-sm keeps them exactly as tall as a form's fields
-const RATE_LIMIT_ACTION_BUTTON =
-    'px-3 py-1.5 text-sm font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700';
-// The one thing a form on this page actually does
-const RATE_LIMIT_SAVE_BUTTON =
-    'px-3 py-1.5 text-sm font-medium rounded-lg border border-transparent bg-blue-600 hover:bg-blue-700 text-white';
+const RATE_LIMIT_ACTION_BUTTON = 'ui-btn ui-btn-sm';
+const RATE_LIMIT_SAVE_BUTTON = 'ui-btn ui-btn-sm ui-btn-primary';
 
 let rateLimitWindowHours = 720;
 let rateLimitSenderSearch = '';
 let rateLimitConfigSearch = '';
-// 'all' | 'mailbox' | 'domain'
 let rateLimitConfigFilter = 'all';
+let rateLimitHideUnlimited = false;
 let rateLimitEventsData = null;
 let rateLimitConfigData = null;
-// { kind: 'mailbox' | 'domain', name: string } while one row's form is open
 let rateLimitEditing = null;
-// The "Apply to filtered" panel: whether it is open and what was typed into
-// it, kept here so re-rendering the card never loses either
 let rateLimitBulkOpen = false;
 let rateLimitBulkValue = '';
 let rateLimitBulkFrame = 'h';
-// Address of the sender whose detail panel is open, kept across reloads
 let rateLimitSelectedSender = null;
-// One sender's full collected history, keyed by address:
-// { events: [...], total: n } once it is read, { failed: true } if the read
-// failed. Kept so stepping in and out of a sender does not fetch it again.
 let rateLimitSenderEvents = {};
-// The address whose history is in flight right now, so re-rendering the open
-// detail does not fire the same request twice
 let rateLimitSenderEventsInFlight = null;
 let rateLimitChart = null;
 
@@ -78,11 +35,11 @@ async function loadRateLimits() {
         return;
     }
 
-    loading.classList.remove('hidden');
+    uiLoadingShow(loading);
     content.classList.add('hidden');
+    rateLimitsGen++;
     rateLimitEditing = null;
     rateLimitBulkOpen = false;
-    // Fresh data means the cached histories are stale
     rateLimitSenderEvents = {};
     rateLimitSenderEventsInFlight = null;
     destroyRateLimitChart();
@@ -94,20 +51,19 @@ async function loadRateLimits() {
         ]);
 
         if (!eventsResponse.ok) {
-            throw new Error(`HTTP ${eventsResponse.status}`);
+            throw await responseError(eventsResponse);
         }
         if (!limitsResponse.ok) {
-            throw new Error(`HTTP ${limitsResponse.status}`);
+            throw await responseError(limitsResponse);
         }
 
         rateLimitEventsData = await eventsResponse.json();
+        if (rateLimitEventsData.hours) rateLimitWindowHours = rateLimitEventsData.hours;
         rateLimitConfigData = await limitsResponse.json();
 
         loading.classList.add('hidden');
         content.classList.remove('hidden');
 
-        // The chart measures its container, so the content has to be visible
-        // before anything is drawn into it
         renderRateLimitActivityCard();
         renderRateLimitSendersCard();
         renderRateLimitConfigCard();
@@ -115,50 +71,97 @@ async function loadRateLimits() {
     } catch (error) {
         console.error('Failed to load rate limits:', error);
         loading.innerHTML = `
-            <div class="text-center py-12">
-                <svg class="w-16 h-16 mx-auto text-red-400 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                </svg>
-                <p class="text-red-500">Failed to load rate limits</p>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-2">${escapeHtml(error.message)}</p>
+            <div class="ui-empty">
+                <p class="ui-text-fail">Failed to load rate limits</p>
+                <p>${escapeHtml(uiErrorText(error))}</p>
+                <button type="button" onclick="loadRateLimits()" class="ui-btn ui-btn-sm">Try again</button>
             </div>
         `;
     }
 }
 
 
-function changeRateLimitWindow(value) {
+let rateLimitsGen = 0;
+
+async function refreshRateLimits() {
+    const content = document.getElementById('rate-limits-content');
+    if (!content) return;
+    if (content.classList.contains('hidden') || !rateLimitEventsData) return loadRateLimits();
+    const working = () => {
+        const active = document.activeElement;
+        return rateLimitEditing || rateLimitBulkOpen || uiTextHeld(content)
+            || Boolean(active && content.contains(active) && active.matches('input, select, textarea'));
+    };
+    if (working()) return;
+    const gen = rateLimitsGen;
+    try {
+        const hours = rateLimitWindowHours;
+        const [eventsResponse, limitsResponse] = await Promise.all([
+            authenticatedFetch(`/api/rate-limits/events?hours=${hours}`, { timeout: PAGE_REFRESH_TIMEOUT }),
+            authenticatedFetch('/api/rate-limits/limits', { timeout: PAGE_REFRESH_TIMEOUT })
+        ]);
+        if (!eventsResponse.ok || !limitsResponse.ok) return;
+        const events = await eventsResponse.json();
+        const limits = await limitsResponse.json();
+        if (gen !== rateLimitsGen || hours !== rateLimitWindowHours || working()) return;
+        const eventsChanged = JSON.stringify(events) !== JSON.stringify(rateLimitEventsData);
+        const limitsChanged = JSON.stringify(limits) !== JSON.stringify(rateLimitConfigData);
+        if (!eventsChanged && !limitsChanged) return;
+        rateLimitEventsData = events;
+        rateLimitConfigData = limits;
+        if (eventsChanged) {
+            rateLimitSenderEvents = {};
+            rateLimitSenderEventsInFlight = null;
+            destroyRateLimitChart();
+            renderRateLimitActivityCard();
+            renderRateLimitSendersCard();
+        }
+        if (limitsChanged) renderRateLimitConfigCard();
+    } catch (error) {
+        console.error('Rate limits refresh failed:', error);
+    }
+}
+
+async function changeRateLimitWindow(value) {
     const hours = parseInt(value, 10);
     if (!Number.isFinite(hours)) return;
+    if (!(await rateLimitsConfirmDrop())) {
+        const select = document.getElementById('rate-limit-window');
+        if (select) {
+            select.value = String(rateLimitWindowHours);
+            if (typeof uiFilterBarSync === 'function') uiFilterBarSync();
+        }
+        return;
+    }
     rateLimitWindowHours = hours;
     loadRateLimits();
 }
 
 
 function renderRateLimitBadge(limit) {
-    if (!limit || !limit.value) {
-        return `<span class="${RATE_LIMIT_BADGE_SHAPE} ${RATE_LIMIT_NEUTRAL_BADGE} whitespace-nowrap">No limit</span>`;
-    }
-    const frame = limit.frame ? `/${escapeHtml(limit.frame)}` : '';
-    return `<span class="${RATE_LIMIT_BADGE_SHAPE} ${getDirectionBadgeClass('outbound')} whitespace-nowrap">${escapeHtml(String(limit.value))}${frame}</span>`;
+    if (!limit || !limit.value) return uiTag('No limit', '');
+    return uiTag(`${limit.value}${limit.frame ? `/${limit.frame}` : ''}`, 'info');
 }
 
 
-// Read-only notice above the configured limits - same banner Fail2ban
-// Settings shows when the Read-Write key is missing
+function rateLimitCardHead(title, subtitle, tools = '') {
+    return `
+        <div class="ui-panel-head ui-rl-head">
+            <div><h3 class="ui-h2">${escapeHtml(title)}</h3><p class="ui-muted">${escapeHtml(subtitle)}</p></div>
+            ${tools ? `<div class="ui-rl-tools">${tools}</div>` : ''}
+        </div>`;
+}
+
+
+const RATE_LIMIT_RESET_LOCKED = `<button type="button" class="ui-btn ui-btn-sm" disabled onclick="event.stopPropagation()"
+    title="Resetting a counter needs the Read-Write API key (MAILCOW_API_KEY_RW)">Reset counter</button>`;
+
 function renderRateLimitReadOnlyNotice() {
     const data = rateLimitConfigData || {};
-    if (data.rw_key_configured !== false) return '';
-    return `
-        <div class="mx-4 my-3 px-4 py-3 rounded-lg bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-300 text-sm flex items-center gap-2">
-            <span class="text-lg">&#128274;</span>
-            <span>Editing requires a <strong>Read-Write API key</strong> (<code>MAILCOW_API_KEY_RW</code>). Configure it in Settings &rarr; Mailcow &rarr; Connection.</span>
-        </div>
-    `;
+    if (data.rw_key_configured !== false || !userCan('mailboxes', 'write')) return '';
+    return `<div class="ui-list-note">${uiLocked('Editing rate limits is locked', `Editing ${UI_RW_KEY_TEXT}`)}</div>`;
 }
 
-
-// ---- Card 1: rate limit activity --------------------------------------------
 
 function renderRateLimitActivityCard() {
     const container = document.getElementById('rate-limits-activity-card');
@@ -172,13 +175,14 @@ function renderRateLimitActivityCard() {
         : `${hits.toLocaleString()} blocked ${hits === 1 ? 'send' : 'sends'}`
             + ` from ${senders} ${senders === 1 ? 'sender' : 'senders'}`;
 
+    const offered = data.windows || [24, 168, 720, 2160, 8760];
     const options = [
         { hours: 24, label: 'Last 24 hours' },
         { hours: 168, label: 'Last 7 days' },
         { hours: 720, label: 'Last 30 days' },
         { hours: 2160, label: 'Last 90 days' },
         { hours: 8760, label: 'Last year' }
-    ].map(option => `
+    ].filter(option => offered.includes(option.hours)).map(option => `
         <option value="${option.hours}" ${option.hours === rateLimitWindowHours ? 'selected' : ''}>${option.label}</option>
     `).join('');
 
@@ -186,77 +190,41 @@ function renderRateLimitActivityCard() {
     const hasHits = buckets.some(bucket => (bucket.count || 0) > 0);
 
     container.innerHTML = `
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
-            <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div class="min-w-0">
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Rate limit activity</h3>
-                    <p class="text-sm text-gray-600 dark:text-gray-400">${escapeHtml(subtitle)}</p>
-                </div>
-                <select id="rate-limit-window" onchange="changeRateLimitWindow(this.value)"
-                    class="w-full sm:w-auto px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
+        <section class="ui-panel">
+            ${rateLimitCardHead('Rate limit activity', subtitle, `
+                <select id="rate-limit-window" onchange="changeRateLimitWindow(this.value)" class="ui-select ui-select-auto" aria-label="Window" data-picker-label="Window" data-picker-host="ui-picker-end">
                     ${options}
-                </select>
-            </div>
+                </select>`)}
             ${hasHits
-            ? `
-                <div class="p-4">
-                    <div style="height: 180px;">
-                        <canvas id="rate-limits-chart"></canvas>
-                    </div>
-                </div>
-            `
+            ? '<div class="ui-chart-body"><div class="ui-rl-chart"><canvas id="rate-limits-chart"></canvas></div></div>'
             : `
-                <div class="px-4 py-10 text-center">
-                    <p class="text-gray-700 dark:text-gray-300 font-medium">Nobody hit a rate limit in this window</p>
-                    <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Widen the window to look further back.</p>
+                <div class="ui-empty">
+                    <p><b>Nobody hit a rate limit in this window</b></p>
+                    <p>Widen the window to look further back.</p>
                 </div>
             `}
-        </div>
+        </section>
     `;
 
     if (hasHits) renderRateLimitChart(buckets, data.bucket === 'hour' ? 'hour' : 'day');
+    uiFilterBarSync();
 }
 
 
-// The API buckets in UTC. An hour bucket is a moment, so it is localised like
-// every other timestamp; a day bucket is a date, so it is labelled verbatim.
-// Labels are numeric (14.09) like every other date in the app, never month
-// names, which would follow the browser language instead of the UI language.
 function rateLimitBucketLabel(bucket, granularity) {
     if (!bucket) return '';
 
     if (granularity === 'hour') {
-        const date = new Date(`${bucket}:00Z`);
-        const options = { hour: '2-digit', minute: '2-digit', hour12: false };
-        try {
-            if (typeof appTimezone !== 'undefined' && appTimezone && appTimezone !== 'UTC') {
-                return new Intl.DateTimeFormat(undefined, { ...options, timeZone: appTimezone }).format(date);
-            }
-        } catch (e) {
-            console.warn('Invalid timezone, using browser local timezone:', appTimezone, e);
-        }
-        return date.toLocaleTimeString(undefined, options);
+        return formatClock(new Date(bucket), { compact: true });
     }
 
-    const [, month, day] = bucket.split('-');
-    return `${day}.${month}`;
+    return formatDayKey(bucket, { year: false });
 }
 
 
-// Short timestamp for narrow screens: day.month and the time, no year, no
-// seconds. Same timezone handling as formatTime in utils.js.
 function rateLimitShortTime(isoString) {
     if (!isoString) return '-';
-    const date = new Date(isoString);
-    const options = { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false };
-    try {
-        if (typeof appTimezone !== 'undefined' && appTimezone && appTimezone !== 'UTC') {
-            return new Intl.DateTimeFormat(undefined, { ...options, timeZone: appTimezone }).format(date);
-        }
-    } catch (e) {
-        console.warn('Invalid timezone, using browser local timezone:', appTimezone, e);
-    }
-    return date.toLocaleString(undefined, options);
+    return `${formatDayMonth(isoString)}, ${formatClock(isoString)}`;
 }
 
 
@@ -274,9 +242,10 @@ function renderRateLimitChart(buckets, granularity) {
 
     destroyRateLimitChart();
 
-    const isDark = document.documentElement.classList.contains('dark');
-    const gridColor = isDark ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
-    const textColor = isDark ? '#d1d5db' : '#374151';
+    const token = (name, fallback) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || fallback;
+    const gridColor = token('--ui-line', 'rgba(0,0,0,0.1)');
+    const textColor = token('--ui-muted', '#6B736E');
+    const barColor = token('--ui-fail', '#C42B1C');
 
     rateLimitChart = new Chart(canvas.getContext('2d'), {
         type: 'bar',
@@ -285,7 +254,7 @@ function renderRateLimitChart(buckets, granularity) {
             datasets: [{
                 label: 'Blocked sends',
                 data: buckets.map(bucket => bucket.count || 0),
-                backgroundColor: isDark ? 'rgba(239,68,68,0.8)' : 'rgba(220,38,38,0.8)',
+                backgroundColor: barColor,
                 borderRadius: 3
             }]
         },
@@ -311,9 +280,6 @@ function renderRateLimitChart(buckets, granularity) {
 }
 
 
-// ---- Card 2: the blocked senders --------------------------------------------
-
-// Recency first: the sender stuck right now outranks last week's noise
 function rateLimitSenders() {
     const data = rateLimitEventsData || {};
     return (data.by_sender || []).slice()
@@ -326,32 +292,23 @@ function renderRateLimitSendersCard() {
     if (!container) return;
 
     const senders = rateLimitSenders();
-    // A sender that fell out of the window closes back to the table
     if (rateLimitSelectedSender && !senders.some(group => group.user === rateLimitSelectedSender)) {
         rateLimitSelectedSender = null;
     }
     const detailMode = !!rateLimitSelectedSender;
 
-    const header = `
-        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div class="min-w-0">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Blocked senders</h3>
-                <p class="text-sm text-gray-600 dark:text-gray-400">Mail that mailcow refused because the sender ran out of allowance</p>
-            </div>
-            ${senders.length === 0 || detailMode ? '' : `
-                <input type="text" value="${escapeHtml(rateLimitSenderSearch)}" placeholder="Search..."
-                    oninput="filterRateLimitSenders(this.value)"
-                    class="w-full sm:w-56 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
-            `}
-        </div>
-    `;
+    const header = rateLimitCardHead('Blocked senders', 'Mail that mailcow refused because the sender ran out of allowance',
+        senders.length === 0 || detailMode ? '' : `
+            <input type="text" value="${escapeHtml(rateLimitSenderSearch)}" placeholder="Search..." aria-label="Search senders"
+                oninput="filterRateLimitSenders(this.value)" class="ui-input ui-rl-search">
+            <span class="ui-count" data-rl-sender-count>${uiCountLabel(senders.length, 'sender', 'senders')}</span>`);
 
     let body;
     if (senders.length === 0) {
         body = `
-            <div class="px-4 py-10 text-center">
-                <p class="text-gray-700 dark:text-gray-300 font-medium">No rate limit hits have been collected</p>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Senders that run out of allowance will show up here.</p>
+            <div class="ui-empty">
+                <p><b>No rate limit hits have been collected</b></p>
+                <p>Senders that run out of allowance will show up here.</p>
             </div>
         `;
     } else if (detailMode) {
@@ -360,70 +317,51 @@ function renderRateLimitSendersCard() {
         body = renderRateLimitSendersTable(senders);
     }
 
-    container.innerHTML = `<div class="bg-white dark:bg-gray-800 rounded-lg shadow">${header}${body}</div>`;
+    container.innerHTML = `<section class="ui-panel">${header}${body}</section>`;
 
     if (!detailMode && senders.length && rateLimitSenderSearch) {
         filterRateLimitSenders(rateLimitSenderSearch);
     }
-    // The detail is painted at once from the rows /events already carried;
-    // the rest of that sender's history arrives after this
     if (detailMode) loadRateLimitSenderHistory(rateLimitSelectedSender);
 }
 
 
 function renderRateLimitSendersTable(senders) {
-    const canWrite = !rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false;
+    const canWrite = (!rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false) && userCan('mailboxes', 'write');
 
     const rows = senders.map(group => {
-        const resetButton = (canWrite && group.last_rl_hash)
-            ? `
-                <button type="button"
-                    onclick="event.stopPropagation(); resetRateLimitCounter('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}')"
-                    class="px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap">
+        const resetButton = !group.last_rl_hash ? ''
+            : canWrite ? `
+                <button data-acts="mailboxes" type="button"
+                    onclick="event.stopPropagation(); resetRateLimitCounterOnce('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}', this)"
+                    class="ui-btn ui-btn-sm ui-btn-primary">
                     Reset counter
                 </button>
             `
-            : '';
+            : userCan('mailboxes', 'write') ? RATE_LIMIT_RESET_LOCKED : '';
         return `
-            <tr data-rl-sender="${escapeHtml((group.user || '').toLowerCase())}"
-                class="hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
-                onclick="selectRateLimitSender('${escapeJsArg(group.user)}')">
-                <td class="px-3 sm:px-4 py-3 min-w-[170px] font-mono text-sm text-gray-900 dark:text-gray-100 break-all">${escapeHtml(group.user)}</td>
-                <td class="px-3 sm:px-4 py-3">
-                    <span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('rejected')} whitespace-nowrap">${group.events}</span>
-                </td>
-                <td class="px-3 sm:px-4 py-3 text-sm text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                    <span class="sm:hidden">${escapeHtml(rateLimitShortTime(group.last_seen))}</span>
-                    <span class="hidden sm:inline">${escapeHtml(formatTime(group.last_seen))}</span>
-                </td>
-                <td class="px-3 sm:px-4 py-3 hide-mobile">${renderRateLimitBadge(group.current_limit)}</td>
-                <td class="px-3 sm:px-4 py-3 hide-mobile">
-                    ${group.last_reset ? `<span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('delivered')} whitespace-nowrap">Reset ${escapeHtml(formatTime(group.last_reset))}</span>` : ''}
-                </td>
-                <!-- On a phone the action lives in the detail view a tap away;
-                     a button beyond the scroll edge is a button nobody finds -->
-                <td class="px-3 sm:px-4 py-3 text-right whitespace-nowrap hide-mobile">${resetButton}</td>
+            <tr data-rl-sender="${escapeHtml((group.user || '').toLowerCase())}" class="ui-dtable-link" tabindex="0" data-row-open
+                onclick="if (!uiRowHeld(event)) selectRateLimitSender('${escapeJsArg(group.user)}')">
+                <td class="ui-dtable-wrap">${uiEntity('address', group.user)}</td>
+                <td>${uiTag(group.events, 'fail')}</td>
+                <td class="ui-nowrap">${uiTime(group.last_seen, formatAgo(group.last_seen), { title: formatTime(group.last_seen) })}</td>
+                <td class="hide-mobile">${renderRateLimitBadge(group.current_limit)}</td>
+                <td class="hide-mobile" data-sort="${Date.parse(group.last_reset) || ''}">${group.last_reset ? uiTag(`Reset ${formatAgo(group.last_reset)}`, 'ok') : ''}</td>
+                <td class="ui-td-end ui-nowrap hide-mobile">${resetButton}</td>
             </tr>
         `;
     }).join('');
 
     return `
-        <div class="mobile-scroll overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                <thead class="bg-gray-50 dark:bg-gray-700">
-                    <tr>
-                        <th class="px-3 sm:px-4 py-3 min-w-[170px] text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Sender</th>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Hits</th>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Last hit</th>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Limit</th>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Last reset</th>
-                        <th class="px-3 sm:px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile"></th>
-                    </tr>
+        <div class="ui-dtable-scroll">
+            <table class="ui-dtable">
+                <thead>
+                    <tr><th>Sender</th><th>Hits</th><th>Last hit</th><th class="hide-mobile">Limit</th><th class="hide-mobile">Last reset</th><th class="hide-mobile"></th></tr>
                 </thead>
-                <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                <tbody>
                     ${rows}
                     <tr data-rl-sender-noresults class="hidden">
-                        <td colspan="6" class="px-3 sm:px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">No matches</td>
+                        <td colspan="6" class="ui-empty">No matches</td>
                     </tr>
                 </tbody>
             </table>
@@ -432,11 +370,8 @@ function renderRateLimitSendersTable(senders) {
 }
 
 
-// Clicking a row swaps the whole card body for that sender's detail view
 function selectRateLimitSender(user) {
     rateLimitSelectedSender = user;
-    // A read that failed last time is worth another try when the reader comes
-    // back to this sender
     const cached = rateLimitSenderEvents[user];
     if (cached && cached.failed) delete rateLimitSenderEvents[user];
     renderRateLimitSendersCard();
@@ -449,7 +384,6 @@ function backToRateLimitSenders() {
 }
 
 
-// Rows are hidden in place, so the search box never loses focus while typing
 function filterRateLimitSenders(query) {
     rateLimitSenderSearch = query || '';
     const card = document.getElementById('rate-limits-senders-card');
@@ -465,41 +399,37 @@ function filterRateLimitSenders(query) {
 
     const empty = card.querySelector('[data-rl-sender-noresults]');
     if (empty) empty.classList.toggle('hidden', shown !== 0);
+    const count = card.querySelector('[data-rl-sender-count]');
+    if (count) count.textContent = uiCountLabel(shown, 'sender', 'senders');
 }
 
 
 function renderRateLimitSenderDetail(group) {
     if (!group) return '';
 
-    const canWrite = !rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false;
+    const canWrite = (!rateLimitConfigData || rateLimitConfigData.rw_key_configured !== false) && userCan('mailboxes', 'write');
 
-    const resetButton = (canWrite && group.last_rl_hash)
-        ? `
-            <button type="button"
-                onclick="resetRateLimitCounter('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}')"
-                class="self-start px-3 py-1.5 text-xs font-medium rounded-lg bg-blue-600 hover:bg-blue-700 text-white whitespace-nowrap">
+    const resetButton = !group.last_rl_hash ? ''
+        : canWrite ? `
+            <button data-acts="mailboxes" type="button"
+                onclick="resetRateLimitCounterOnce('${escapeJsArg(group.user)}', '${escapeJsArg(group.last_rl_hash)}', this)"
+                class="ui-btn ui-btn-sm ui-btn-primary">
                 Reset counter
             </button>
         `
-        : '';
+        : userCan('mailboxes', 'write') ? RATE_LIMIT_RESET_LOCKED : '';
 
     const resetBadge = group.last_reset
-        ? `<span class="${RATE_LIMIT_BADGE_SHAPE} ${getStatusBadgeClass('delivered')} whitespace-nowrap">Reset ${escapeHtml(formatTime(group.last_reset))}</span>`
+        ? uiTag(`Reset ${formatTime(group.last_reset)}`, 'ok')
         : '';
 
     return `
-        <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-            <div class="min-w-0">
-                <button type="button" onclick="backToRateLimitSenders()"
-                    class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 mb-3">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-                    </svg>
-                    All senders
-                </button>
-                <p class="font-mono text-sm text-gray-900 dark:text-gray-100 break-all">${escapeHtml(group.user)}</p>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Last hit ${escapeHtml(formatTime(group.last_seen))}</p>
-                <div class="flex flex-wrap items-center gap-2 mt-2">
+        <div class="ui-rl-sender">
+            <div>
+                <button type="button" onclick="backToRateLimitSenders()" class="ui-btn ui-btn-sm">← All senders</button>
+                <p class="ui-dtable-wrap"><b>${uiEntity('address', group.user)}</b></p>
+                <p class="ui-muted">Last hit ${escapeHtml(formatTime(group.last_seen))}</p>
+                <div class="ui-chip-row">
                     ${renderRateLimitBadge(group.current_limit)}
                     ${resetBadge}
                 </div>
@@ -511,26 +441,20 @@ function renderRateLimitSenderDetail(group) {
 }
 
 
-// The refused messages of the open sender: the handful /events already carried
-// until the full history lands, then all of it. Only this block is repainted
-// when it does, so the panel above it never flickers.
 function renderRateLimitSenderEvents(group) {
     const cached = rateLimitSenderEvents[group.user];
     const loaded = !!(cached && cached.events);
     const rows = loaded ? cached.events : (group.recent || []);
 
     if (rows.length === 0) {
-        return '<p class="px-4 py-6 text-sm text-gray-500 dark:text-gray-400">No details were recorded for these hits</p>';
+        return '<p class="ui-empty">No details were recorded for these hits</p>';
     }
 
-    // Before the history lands, the hit count from /events is the real total
     const total = loaded ? cached.total : (group.events || rows.length);
     const count = loaded && cached.total > rows.length
         ? `Showing ${rows.length.toLocaleString()} of ${cached.total.toLocaleString()}`
         : `${total.toLocaleString()} refused ${total === 1 ? 'message' : 'messages'}`;
 
-    // A quiet line rather than a spinner: the rows already on screen stay
-    // readable while the rest is on its way
     let note = '';
     if (total > rows.length) {
         if (cached && cached.failed) {
@@ -541,30 +465,22 @@ function renderRateLimitSenderEvents(group) {
     }
 
     return `
-        <p class="px-4 pt-3 text-sm text-gray-500 dark:text-gray-400">${escapeHtml(count)}</p>
-        <div class="mobile-scroll overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                <thead class="bg-gray-50 dark:bg-gray-700">
-                    <tr>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Time</th>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Recipient</th>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Subject</th>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Queue id</th>
-                    </tr>
+        <p class="ui-muted ui-rl-note">${escapeHtml(count)}</p>
+        <div class="ui-dtable-scroll">
+            <table class="ui-dtable">
+                <thead>
+                    <tr><th>Time</th><th>Recipient</th><th>Subject</th><th class="hide-mobile">Queue id</th></tr>
                 </thead>
-                <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                <tbody>
                     ${rows.map(renderRateLimitEventRow).join('')}
                 </tbody>
             </table>
         </div>
-        ${note ? `<p class="px-4 py-2 text-sm text-gray-500 dark:text-gray-400">${escapeHtml(note)}</p>` : ''}
+        ${note ? `<p class="ui-muted ui-rl-note">${escapeHtml(note)}</p>` : ''}
     `;
 }
 
 
-// Everything this viewer collected about one sender, not just the rows the big
-// /events response carries. Read once per sender and kept until the page data
-// is reloaded.
 async function loadRateLimitSenderHistory(user) {
     if (!user || rateLimitSenderEvents[user] || rateLimitSenderEventsInFlight === user) return;
     rateLimitSenderEventsInFlight = user;
@@ -573,7 +489,7 @@ async function loadRateLimitSenderHistory(user) {
         const response = await authenticatedFetch(
             `/api/rate-limits/sender-events?user=${encodeURIComponent(user)}`);
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            throw await responseError(response);
         }
         const data = await response.json();
         const events = data.events || [];
@@ -583,14 +499,11 @@ async function loadRateLimitSenderHistory(user) {
         };
     } catch (error) {
         console.error('Failed to load the full history of a blocked sender:', error);
-        // The rows already on screen stay; only the note changes
         rateLimitSenderEvents[user] = { failed: true };
     } finally {
         if (rateLimitSenderEventsInFlight === user) rateLimitSenderEventsInFlight = null;
     }
 
-    // The reader may have gone back, or opened another sender, while this was
-    // in flight - an answer nobody is looking at is dropped
     if (rateLimitSelectedSender !== user) return;
     refreshRateLimitSenderEvents(user);
 }
@@ -611,26 +524,23 @@ function renderRateLimitEventRow(event) {
     const subject = event.subject || '';
     const shortened = subject.length > 70 ? `${subject.slice(0, 70)}...` : subject;
 
-    // On a narrow screen every cell keeps its natural width and the table
-    // scrolls sideways inside its card. Squeezed columns that snap addresses
-    // in half are worse than a scroll.
     return `
-        <tr class="border-t border-gray-200 dark:border-gray-700">
-            <td class="px-3 sm:px-4 py-2 text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap">
-                <span class="sm:hidden">${escapeHtml(rateLimitShortTime(event.time))}</span>
-                <span class="hidden sm:inline">${escapeHtml(formatTime(event.time))}</span>
-            </td>
-            <td class="px-3 sm:px-4 py-2 font-mono text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap sm:whitespace-normal sm:break-all">${escapeHtml(event.rcpt)}</td>
-            <td class="px-3 sm:px-4 py-2 text-sm text-gray-700 dark:text-gray-300">${shortened
-                ? `<div class="truncate max-w-[240px] sm:max-w-none sm:whitespace-normal" dir="auto">${escapeHtml(shortened)}</div>`
-                : '<span class="text-gray-400">No subject</span>'}</td>
-            <td class="px-3 sm:px-4 py-2 font-mono text-xs text-gray-500 dark:text-gray-400 whitespace-nowrap hide-mobile">${escapeHtml(event.qid)}</td>
+        <tr>
+            <td class="ui-nowrap" data-sort="${Date.parse(event.time) || ''}"><span class="ui-phone-only">${escapeHtml(rateLimitShortTime(event.time))}</span><span class="ui-phone-hide">${escapeHtml(formatTime(event.time))}</span></td>
+            <td class="ui-dtable-wrap">${uiEntity('address', event.rcpt)}</td>
+            <td>${shortened ? `<span dir="auto">${escapeHtml(shortened)}</span>` : '<span class="ui-muted">No subject</span>'}</td>
+            <td class="ui-mono ui-muted ui-nowrap hide-mobile">${copyableText(event.qid)}</td>
         </tr>
     `;
 }
 
 
+function resetRateLimitCounterOnce(user, rlHash, button) {
+    return uiOnce(`rate-limit-reset:${user}`, () => resetRateLimitCounter(user, rlHash), button, 'Resetting...');
+}
 async function resetRateLimitCounter(user, rlHash) {
+    if (!uiMayAct('mailboxes')) return;
+    rateLimitsGen++;
     const confirmed = await showConfirmModal({
         title: 'Reset rate limit counter',
         message: `Let ${user} send again straight away? This clears the counter they are stuck behind. Their limit stays as it is.`,
@@ -647,36 +557,29 @@ async function resetRateLimitCounter(user, rlHash) {
 
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
-            showToast(detail.detail || 'Could not reset the counter', 'error');
+            showToast(`Could not reset the counter: ${uiHttpErrorText(response.status, detail)}`, 'error');
             return;
         }
 
         showToast(`${user} can send again`, 'success');
-        // Update in place. A full reload would flash the loading screen and
-        // throw the reader back to the top of the page for a one-row change.
         const group = ((rateLimitEventsData || {}).by_sender || [])
             .find(entry => entry.user === user);
         if (group) group.last_reset = new Date().toISOString();
         renderRateLimitSendersCard();
     } catch (error) {
         console.error('Failed to reset rate limit counter:', error);
-        showToast('Could not reset the counter', 'error');
+        showToast(`Could not reset the counter: ${uiErrorText(error)}`, 'error');
     }
 }
 
-
-// ---- Card 3: the configured limits ------------------------------------------
-// Mailboxes and domains share one table. A domain limit caps all of its
-// mailboxes together, so seeing both side by side is the whole point.
 
 function renderRateLimitConfigCard() {
     const container = document.getElementById('rate-limits-config-card');
     if (!container) return;
 
     const data = rateLimitConfigData || {};
-    const canWrite = data.rw_key_configured !== false;
+    const canWrite = data.rw_key_configured !== false && userCan('mailboxes', 'write');
 
-    // Domains first: the broader cap explains the mailboxes underneath it
     const rows = (data.domains || []).map(domain => renderRateLimitConfigRow(
         'domain', domain.domain, domain.rl_value, domain.rl_frame, canWrite))
         .concat((data.mailboxes || []).map(mailbox => renderRateLimitConfigRow(
@@ -688,36 +591,26 @@ function renderRateLimitConfigCard() {
         { id: 'mailbox', label: 'Mailboxes' },
         { id: 'domain', label: 'Domains' }
     ].map(chip => `
-        <button type="button" onclick="setRateLimitConfigFilter('${chip.id}')"
-            data-rl-chip="${chip.id}"
-            class="${RATE_LIMIT_CHIP_SHAPE} ${chip.id === rateLimitConfigFilter ? RATE_LIMIT_CHIP_ACTIVE : RATE_LIMIT_CHIP_INACTIVE}">
-            ${chip.label}
-        </button>
+        <button type="button" onclick="setRateLimitConfigFilter('${chip.id}')" data-rl-chip="${chip.id}"
+            class="ui-chip" aria-pressed="${chip.id === rateLimitConfigFilter ? 'true' : 'false'}">${chip.label}</button>
     `).join('');
 
     const domainsError = data.domains_error
         ? `
-            <div class="px-4 py-2 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-500/10 border-b border-amber-200 dark:border-amber-500/20">
-                Domain limits could not be read from mailcow: ${escapeHtml(data.domains_error)}
-            </div>
+            <p class="ui-rl-warning">Domain limits could not be read from mailcow: ${escapeHtml(data.domains_error)}</p>
         `
         : '';
 
     const table = `
-        <div class="mobile-scroll overflow-x-auto">
-            <table class="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-                <thead class="bg-gray-50 dark:bg-gray-700">
-                    <tr>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider hide-mobile">Type</th>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Name</th>
-                        <th class="px-3 sm:px-4 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider">Limit</th>
-                        <th class="px-3 sm:px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-300 uppercase tracking-wider"></th>
-                    </tr>
+        <div class="ui-dtable-scroll">
+            <table class="ui-dtable">
+                <thead>
+                    <tr><th class="hide-mobile">Type</th><th>Name</th><th>Limit</th><th></th></tr>
                 </thead>
-                <tbody class="bg-white dark:bg-gray-800 divide-y divide-gray-200 dark:divide-gray-700">
+                <tbody>
                     ${rows}
                     <tr data-rl-noresults class="hidden">
-                        <td colspan="4" class="px-3 sm:px-4 py-8 text-center text-sm text-gray-500 dark:text-gray-400">No matches</td>
+                        <td colspan="4" class="ui-empty">No matches</td>
                     </tr>
                 </tbody>
             </table>
@@ -725,36 +618,26 @@ function renderRateLimitConfigCard() {
     `;
 
     const empty = `
-        <div class="px-4 py-10 text-center">
-            <p class="text-gray-700 dark:text-gray-300 font-medium">Nothing is limited yet</p>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">Mailboxes and domains send without a cap until you set one.</p>
+        <div class="ui-empty">
+            <p><b>Nothing is limited yet</b></p>
+            <p>Mailboxes and domains send without a cap until you set one.</p>
         </div>
     `;
 
     container.innerHTML = `
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow">
-            <div class="px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div class="min-w-0">
-                    <h3 class="text-lg font-semibold text-gray-900 dark:text-white">Configured limits</h3>
-                    <p class="text-sm text-gray-600 dark:text-gray-400">How much each mailbox and domain is allowed to send</p>
-                </div>
-                <div class="flex flex-wrap items-center gap-2 min-w-0">
-                    ${chips}
-                    <input type="text" value="${escapeHtml(rateLimitConfigSearch)}" placeholder="Search..."
-                        oninput="filterRateLimitConfigRows(this.value)"
-                        class="w-full sm:w-56 px-3 py-2 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300">
-                    ${canWrite && rows ? `
-                        <button type="button" onclick="toggleRateLimitBulkPanel()" class="${RATE_LIMIT_ACTION_BUTTON} whitespace-nowrap">
-                            Apply to filtered
-                        </button>
-                    ` : ''}
-                </div>
-            </div>
+        <section class="ui-panel">
+            ${rateLimitCardHead('Configured limits', 'How much each mailbox and domain is allowed to send', `
+                ${chips}
+                <label class="ui-check-label"><input type="checkbox" class="ui-check" ${rateLimitHideUnlimited ? 'checked' : ''} onchange="setRateLimitHideUnlimited(this.checked)"> Hide no limit</label>
+                <input type="text" value="${escapeHtml(rateLimitConfigSearch)}" placeholder="Search..." aria-label="Search limits"
+                    oninput="filterRateLimitConfigRows(this.value)" class="ui-input ui-rl-search">
+                <span class="ui-count" data-rl-config-count></span>
+                ${canWrite && rows ? `<button type="button" onclick="toggleRateLimitBulkPanel()" class="${RATE_LIMIT_ACTION_BUTTON}">Apply to filtered</button>` : ''}`)}
             ${renderRateLimitBulkPanel()}
             ${renderRateLimitReadOnlyNotice()}
             ${domainsError}
             ${rows ? table : empty}
-        </div>
+        </section>
     `;
 
     if (rows) applyRateLimitConfigFilters();
@@ -767,10 +650,14 @@ function setRateLimitConfigFilter(kind) {
     if (!card) return;
 
     card.querySelectorAll('[data-rl-chip]').forEach(btn => {
-        const isActive = btn.dataset.rlChip === kind;
-        btn.className = `${RATE_LIMIT_CHIP_SHAPE} `
-            + (isActive ? RATE_LIMIT_CHIP_ACTIVE : RATE_LIMIT_CHIP_INACTIVE);
+        btn.setAttribute('aria-pressed', btn.dataset.rlChip === kind ? 'true' : 'false');
     });
+    applyRateLimitConfigFilters();
+}
+
+
+function setRateLimitHideUnlimited(hide) {
+    rateLimitHideUnlimited = !!hide;
     applyRateLimitConfigFilters();
 }
 
@@ -781,67 +668,53 @@ function filterRateLimitConfigRows(query) {
 }
 
 
-// Rows are hidden in place, so the search box never loses focus while typing
 function applyRateLimitConfigFilters() {
     const card = document.getElementById('rate-limits-config-card');
     if (!card) return;
 
-    const q = rateLimitConfigSearch.trim().toLowerCase();
     let shown = 0;
     card.querySelectorAll('tbody tr[data-rl-name]').forEach(tr => {
-        const matchesName = !q || (tr.dataset.rlName || '').includes(q);
-        const matchesKind = rateLimitConfigFilter === 'all' || tr.dataset.rlKind === rateLimitConfigFilter;
-        const match = matchesName && matchesKind;
+        const match = rateLimitConfigMatches(tr.dataset.rlKind, tr.dataset.rlName, tr.dataset.rlLimited === '1');
         tr.classList.toggle('hidden', !match);
         if (match && !tr.hasAttribute('data-rl-editrow')) shown++;
     });
 
     const empty = card.querySelector('[data-rl-noresults]');
     if (empty) empty.classList.toggle('hidden', shown !== 0);
+    const count = card.querySelector('[data-rl-config-count]');
+    if (count) count.textContent = uiCountLabel(shown, 'entry', 'entries');
 
     refreshRateLimitBulkPanel();
 }
 
 
-// ---- Apply one limit to everything the filter shows --------------------------
-// Set 100/m on every mailbox of one domain in a single action, instead of
-// opening 40 rows one after another. What gets changed is exactly what the
-// table shows: search plus the type chips, nothing hidden.
-
-// The match applyRateLimitConfigFilters runs on the rows, run against the data
-// instead of the DOM - the counts have to be right even while the table is
-// being rebuilt, and the DOM is only ever a picture of this
-function rateLimitConfigMatches(kind, name) {
+function rateLimitConfigMatches(kind, name, value) {
     const q = rateLimitConfigSearch.trim().toLowerCase();
     const matchesName = !q || (name || '').toLowerCase().includes(q);
     const matchesKind = rateLimitConfigFilter === 'all' || kind === rateLimitConfigFilter;
-    return matchesName && matchesKind;
+    const matchesLimit = !rateLimitHideUnlimited || !!value;
+    return matchesName && matchesKind && matchesLimit;
 }
 
 
-// The names the configured limits card currently shows, by kind
 function rateLimitFilteredTargets() {
     const data = rateLimitConfigData || {};
     return {
         mailboxes: (data.mailboxes || [])
-            .filter(entry => rateLimitConfigMatches('mailbox', entry.username))
+            .filter(entry => rateLimitConfigMatches('mailbox', entry.username, entry.rl_value))
             .map(entry => entry.username),
         domains: (data.domains || [])
-            .filter(entry => rateLimitConfigMatches('domain', entry.domain))
+            .filter(entry => rateLimitConfigMatches('domain', entry.domain, entry.rl_value))
             .map(entry => entry.domain)
     };
 }
 
 
-// "1 mailbox", "12 mailboxes" - used by the caption, the confirmation and the
-// toast, so the three never disagree
 function rateLimitCountLabel(count, singular, plural) {
     return `${count} ${count === 1 ? singular : plural}`;
 }
 
 
-// What the action covers, in words. A kind nobody selected is left out rather
-// than shown as "0 domains".
 function rateLimitBulkScope(mailboxes, domains) {
     const parts = [];
     if (mailboxes) parts.push(rateLimitCountLabel(mailboxes, 'mailbox', 'mailboxes'));
@@ -870,19 +743,17 @@ function renderRateLimitBulkPanel() {
     `).join('');
 
     return `
-        <div class="px-4 py-3 bg-gray-50 dark:bg-gray-900/30 border-b border-gray-200 dark:border-gray-700">
-            <p data-rl-bulk-caption class="text-sm text-gray-600 dark:text-gray-400 mb-3">${escapeHtml(rateLimitBulkCaption(targets.mailboxes.length, targets.domains.length))}</p>
-            <div class="flex flex-wrap items-center gap-3">
-                <label for="rate-limit-bulk-value" class="text-sm text-gray-600 dark:text-gray-400">Allow</label>
+        <div class="ui-rl-form">
+            <p data-rl-bulk-caption class="ui-muted">${escapeHtml(rateLimitBulkCaption(targets.mailboxes.length, targets.domains.length))}</p>
+            <div class="ui-rl-form-row">
+                <label for="rate-limit-bulk-value" class="ui-muted">Allow</label>
                 <input id="rate-limit-bulk-value" type="number" min="0" step="1" value="${escapeHtml(rateLimitBulkValue)}"
-                    placeholder="messages" oninput="setRateLimitBulkValue(this.value)"
-                    class="w-32 px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
-                <select id="rate-limit-bulk-frame" onchange="setRateLimitBulkFrame(this.value)"
-                    class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                    placeholder="messages" oninput="setRateLimitBulkValue(this.value)" class="ui-input ui-rl-number">
+                <select id="rate-limit-bulk-frame" onchange="setRateLimitBulkFrame(this.value)" class="ui-select ui-select-auto">
                     ${frames}
                 </select>
-                <button type="button" data-rl-bulk-apply onclick="applyRateLimitBulk()" ${nothing ? 'disabled' : ''}
-                    class="${RATE_LIMIT_SAVE_BUTTON} disabled:opacity-50 disabled:cursor-not-allowed">
+                <button data-acts="mailboxes" type="button" data-rl-bulk-apply onclick="applyRateLimitBulkOnce(this)" ${nothing ? 'disabled' : ''}
+                    class="${RATE_LIMIT_SAVE_BUTTON}">
                     Apply
                 </button>
                 <button type="button" onclick="closeRateLimitBulkPanel()" class="${RATE_LIMIT_ACTION_BUTTON}">
@@ -894,8 +765,6 @@ function renderRateLimitBulkPanel() {
 }
 
 
-// Typing in the search box never re-renders the card (it would lose focus), so
-// the panel's counts are refreshed in place whenever the filter changes
 function refreshRateLimitBulkPanel() {
     const card = document.getElementById('rate-limits-config-card');
     const caption = card && card.querySelector('[data-rl-bulk-caption]');
@@ -910,6 +779,28 @@ function refreshRateLimitBulkPanel() {
 }
 
 
+uiUnsavedRegister('rate-limits', {
+    count: () => {
+        let n = 0;
+        const value = document.getElementById('rate-limit-value');
+        const frame = document.getElementById('rate-limit-frame');
+        if (rateLimitEditing && value && value.isConnected
+            && (value.value !== value.defaultValue || (frame && frame.selectedIndex >= 0 && !frame.options[frame.selectedIndex].defaultSelected))) n++;
+        const bulk = document.getElementById('rate-limit-bulk-value');
+        if (rateLimitBulkOpen && bulk && bulk.isConnected && bulk.value.trim() !== '') n++;
+        return n;
+    },
+    drop: () => {
+        rateLimitEditing = null;
+        rateLimitBulkOpen = false;
+        rateLimitBulkValue = '';
+        if (document.getElementById('rate-limit-value') || document.getElementById('rate-limit-bulk-value')) renderRateLimitConfigCard();
+    },
+});
+function rateLimitsConfirmDrop() {
+    return uiConfirmLeave({ route: 'mailbox-stats', params: { sub: 'rate-limits' }, reload: true });
+}
+
 function setRateLimitBulkValue(value) {
     rateLimitBulkValue = value || '';
 }
@@ -920,10 +811,10 @@ function setRateLimitBulkFrame(frame) {
 }
 
 
-function toggleRateLimitBulkPanel() {
+async function toggleRateLimitBulkPanel() {
+    rateLimitsGen++;
+    if (!rateLimitBulkOpen && rateLimitEditing && !(await rateLimitsConfirmDrop())) return;
     rateLimitBulkOpen = !rateLimitBulkOpen;
-    // One open form at a time: a row being edited and a bulk apply above it
-    // are two answers to the same question
     if (rateLimitBulkOpen) rateLimitEditing = null;
     renderRateLimitConfigCard();
 }
@@ -935,13 +826,20 @@ function closeRateLimitBulkPanel() {
 }
 
 
+function applyRateLimitBulkOnce(button) {
+    return uiOnce('rate-limit-bulk', applyRateLimitBulk, button, 'Applying...');
+}
 async function applyRateLimitBulk() {
+    if (!uiMayAct('mailboxes')) return;
+    rateLimitsGen++;
     const targets = rateLimitFilteredTargets();
     if (!targets.mailboxes.length && !targets.domains.length) return;
 
     const value = parseInt(rateLimitBulkValue, 10);
     if (!Number.isFinite(value) || value < 0) {
-        showToast('Enter how many messages to allow, as a whole number', 'error');
+        const field = document.getElementById('rate-limit-bulk-value');
+        if (field) uiFieldProblem(field, 'Enter how many messages to allow, as a whole number.', field.closest('.ui-rl-form-row'));
+        else showToast('Enter how many messages to allow, as a whole number', 'error');
         return;
     }
 
@@ -973,20 +871,17 @@ async function applyRateLimitBulk() {
 
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
-            showToast(detail.detail || 'Could not apply the rate limit', 'error');
+            showToast(`Could not apply the rate limit: ${uiHttpErrorText(response.status, detail)}`, 'error');
             return;
         }
 
         const result = await response.json().catch(() => ({}));
-        // A name the server did not recognise keeps the limit it already had
         const skipped = (result.skipped || []).map(name => String(name).toLowerCase());
         const untouched = new Set(skipped);
         const applied = names => new Set(names.filter(name => !untouched.has(name.toLowerCase())));
         const mailboxes = applied(targets.mailboxes);
         const domains = applied(targets.domains);
 
-        // Update the rows in place instead of reloading the whole page - an
-        // apply should not flash the loading screen or lose scroll position
         const newValue = value === 0 ? null : value;
         const newFrame = value === 0 ? null : frame;
         const config = rateLimitConfigData || {};
@@ -1004,7 +899,6 @@ async function applyRateLimitBulk() {
         rateLimitBulkOpen = false;
         renderRateLimitConfigCard();
 
-        // A mailbox's limit also shows on its row in Blocked senders
         const senderNames = new Set(Array.from(mailboxes, name => name.toLowerCase()));
         let sendersChanged = false;
         ((rateLimitEventsData || {}).by_sender || []).forEach(group => {
@@ -1025,7 +919,7 @@ async function applyRateLimitBulk() {
             : `Limit set on ${changed}${tail}`, 'success');
     } catch (error) {
         console.error('Failed to apply the rate limit in bulk:', error);
-        showToast('Could not apply the rate limit', 'error');
+        showToast(`Could not apply the rate limit: ${uiErrorText(error)}`, 'error');
     }
 }
 
@@ -1050,13 +944,11 @@ function renderRateLimitConfigRow(kind, name, value, frame, canWrite) {
             `);
 
     const row = `
-        <tr data-rl-name="${escapeHtml(name.toLowerCase())}" data-rl-kind="${kind}" class="hover:bg-gray-50 dark:hover:bg-gray-700">
-            <td class="px-3 sm:px-4 py-3 hide-mobile">
-                <span class="${RATE_LIMIT_BADGE_SHAPE} ${RATE_LIMIT_NEUTRAL_BADGE} whitespace-nowrap">${kind === 'domain' ? 'Domain' : 'Mailbox'}</span>
-            </td>
-            <td class="px-3 sm:px-4 py-3 min-w-[170px] text-sm font-mono text-gray-900 dark:text-gray-100 break-all">${escapeHtml(name)}</td>
-            <td class="px-3 sm:px-4 py-3">${renderRateLimitBadge(value ? { value: value, frame: frame } : null)}</td>
-            <td class="px-3 sm:px-4 py-3 text-right whitespace-nowrap">${action}</td>
+        <tr data-rl-name="${escapeHtml(name.toLowerCase())}" data-rl-kind="${kind}" data-rl-limited="${value ? '1' : '0'}">
+            <td class="hide-mobile">${uiTag(kind === 'domain' ? 'Domain' : 'Mailbox', '')}</td>
+            <td class="ui-dtable-wrap">${uiEntity(kind === 'domain' ? 'domain' : 'address', name)}</td>
+            <td>${renderRateLimitBadge(value ? { value: value, frame: frame } : null)}</td>
+            <td class="ui-td-end ui-nowrap">${action}</td>
         </tr>
     `;
 
@@ -1071,23 +963,20 @@ function renderRateLimitEditForm(kind, name, value, frame) {
     `).join('');
 
     return `
-        <tr data-rl-name="${escapeHtml(name.toLowerCase())}" data-rl-kind="${kind}" data-rl-editrow class="bg-gray-50 dark:bg-gray-900/30">
-            <td colspan="4" class="px-3 sm:px-4 py-3">
-                <div class="flex flex-wrap items-center gap-3">
-                    <label for="rate-limit-value" class="text-sm text-gray-600 dark:text-gray-400">Allow</label>
+        <tr data-rl-name="${escapeHtml(name.toLowerCase())}" data-rl-kind="${kind}" data-rl-limited="${value ? '1' : '0'}" data-rl-editrow class="ui-rl-editrow">
+            <td colspan="4">
+                <div class="ui-rl-form-row">
+                    <label for="rate-limit-value" class="ui-muted">Allow</label>
                     <input id="rate-limit-value" type="number" min="0" step="1" value="${value ? escapeHtml(String(value)) : ''}"
-                        placeholder="messages"
-                        class="w-32 px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
-                    <select id="rate-limit-frame"
-                        class="px-3 py-1.5 text-sm rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white">
+                        placeholder="messages" class="ui-input ui-rl-number">
+                    <select id="rate-limit-frame" class="ui-select ui-select-auto">
                         ${frames}
                     </select>
-                    <button type="button" onclick="saveRateLimit('${kind}', '${escapeJsArg(name)}')"
+                    <button type="button" onclick="saveRateLimitOnce('${kind}', '${escapeJsArg(name)}', this)"
                         class="${RATE_LIMIT_SAVE_BUTTON}">
                         Save
                     </button>
-                    <button type="button" onclick="removeRateLimit('${kind}', '${escapeJsArg(name)}')"
-                        class="px-3 py-1.5 text-sm font-medium rounded-lg border border-red-300 dark:border-red-500/40 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10">
+                    <button type="button" onclick="removeRateLimit('${kind}', '${escapeJsArg(name)}')" class="ui-btn ui-btn-sm ui-btn-danger">
                         Remove limit
                     </button>
                 </div>
@@ -1097,9 +986,10 @@ function renderRateLimitEditForm(kind, name, value, frame) {
 }
 
 
-function openRateLimitEdit(kind, name) {
+async function openRateLimitEdit(kind, name) {
+    if (!(await rateLimitsConfirmDrop())) return;
+    rateLimitsGen++;
     rateLimitEditing = { kind: kind, name: name };
-    // One open form at a time, in both directions
     rateLimitBulkOpen = false;
     renderRateLimitConfigCard();
 }
@@ -1111,6 +1001,9 @@ function closeRateLimitEdit() {
 }
 
 
+function saveRateLimitOnce(kind, name, button) {
+    return uiOnce(button || `rate-limit:${kind}:${name}`, () => saveRateLimit(kind, name), button, 'Saving...');
+}
 async function saveRateLimit(kind, name) {
     const valueInput = document.getElementById('rate-limit-value');
     const frameSelect = document.getElementById('rate-limit-frame');
@@ -1118,7 +1011,7 @@ async function saveRateLimit(kind, name) {
 
     const value = parseInt(valueInput.value, 10);
     if (!Number.isFinite(value) || value < 0) {
-        showToast('Enter how many messages to allow, as a whole number', 'error');
+        uiFieldProblem(valueInput, 'Enter how many messages to allow, as a whole number.', valueInput.closest('.ui-rl-form-row'));
         return;
     }
 
@@ -1141,6 +1034,8 @@ async function removeRateLimit(kind, name) {
 
 
 async function submitRateLimit(kind, name, value, frame) {
+    if (!uiMayAct('mailboxes')) return;
+    rateLimitsGen++;
     const url = kind === 'mailbox' ? '/api/rate-limits/mailbox' : '/api/rate-limits/domain';
     const payload = kind === 'mailbox'
         ? { mailbox: name, value: value, frame: frame }
@@ -1155,7 +1050,7 @@ async function submitRateLimit(kind, name, value, frame) {
 
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
-            showToast(detail.detail || 'Could not save the rate limit', 'error');
+            showToast(`Could not save the rate limit: ${uiHttpErrorText(response.status, detail)}`, 'error');
             return;
         }
 
@@ -1166,8 +1061,6 @@ async function submitRateLimit(kind, name, value, frame) {
 
         rateLimitEditing = null;
 
-        // Update the row in place instead of reloading the whole page - a
-        // save should not flash the loading screen or lose scroll position
         const newValue = value === 0 ? null : value;
         const newFrame = value === 0 ? null : frame;
         const config = rateLimitConfigData || {};
@@ -1180,7 +1073,6 @@ async function submitRateLimit(kind, name, value, frame) {
         }
         renderRateLimitConfigCard();
 
-        // A mailbox's limit also shows on its row in Blocked senders
         if (kind === 'mailbox') {
             const group = ((rateLimitEventsData || {}).by_sender || [])
                 .find(entry => entry.user === name.toLowerCase());
@@ -1191,6 +1083,6 @@ async function submitRateLimit(kind, name, value, frame) {
         }
     } catch (error) {
         console.error('Failed to save rate limit:', error);
-        showToast('Could not save the rate limit', 'error');
+        showToast(`Could not save the rate limit: ${uiErrorText(error)}`, 'error');
     }
 }

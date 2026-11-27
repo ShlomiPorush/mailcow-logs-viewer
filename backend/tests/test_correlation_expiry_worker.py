@@ -1,4 +1,3 @@
-"""Expiry uses a worker and a bulk update without changing status semantics."""
 import asyncio
 import threading
 import uuid
@@ -12,6 +11,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import Session
 
 from app import scheduler
+from app.services import correlation_jobs
 from app.config import settings
 from app.database import Base, engine
 from app.models import MessageCorrelation
@@ -35,8 +35,8 @@ def test_expiry_leaves_event_loop_responsive(monkeypatch):
         finally:
             threads.append(threading.get_ident())
             finished.set()
-    monkeypatch.setattr(scheduler, "get_db_context", session)
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(correlation_jobs, "get_db_context", session)
+    monkeypatch.setitem(scheduler.job_status, "expire_correlations", {})
     async def run():
         loop_thread = threading.get_ident()
         task = asyncio.create_task(scheduler.expire_old_correlations())
@@ -57,8 +57,8 @@ def test_expiry_reports_database_failure(monkeypatch):
     def session():
         raise RuntimeError("fixture database failure")
         yield
-    monkeypatch.setattr(scheduler, "get_db_context", session)
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(correlation_jobs, "get_db_context", session)
+    monkeypatch.setitem(scheduler.job_status, "expire_correlations", {})
     asyncio.run(scheduler.expire_old_correlations())
     assert scheduler.job_status["expire_correlations"]["status"] == "failed"
     assert scheduler.job_status["expire_correlations"]["error"] == "fixture database failure"
@@ -84,9 +84,9 @@ def test_expiry_boundaries_and_bulk_query(monkeypatch, extra_rows):
     def session():
         with Session(isolated) as db:
             yield db
-    monkeypatch.setattr(scheduler, "datetime", Clock)
-    monkeypatch.setattr(scheduler, "get_db_context", session)
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(correlation_jobs, "datetime", Clock)
+    monkeypatch.setattr(correlation_jobs, "get_db_context", session)
+    monkeypatch.setitem(scheduler.job_status, "expire_correlations", {})
     monkeypatch.setattr(settings._inner, "max_correlation_age_minutes", 10)
     statements = []
     def capture(conn, cursor, statement, parameters, context, executemany):
@@ -125,7 +125,6 @@ def test_expiry_boundaries_and_bulk_query(monkeypatch, extra_rows):
                 assert row.subject == "Preserve this text"
         assert len(statements) == 1
         assert statements[0].lstrip().upper().startswith("UPDATE ")
-        # Repeated expiry is harmless and still succeeds.
         asyncio.run(scheduler.expire_old_correlations())
         assert scheduler.job_status["expire_correlations"]["status"] == "success"
     finally:

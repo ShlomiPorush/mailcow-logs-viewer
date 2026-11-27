@@ -1,7 +1,3 @@
-"""The Rspamd suppression map is a regexp map. Entries written as bare
-addresses are compiled unanchored, so e@example.com blocked every recipient
-that merely contains it - alice@example.com, joe@example.com. Entries must
-be anchored, escaped patterns."""
 import asyncio
 import re
 import uuid
@@ -15,22 +11,16 @@ sf.StaticFiles.__init__ = lambda s, *a, **k: _orig_init(s, *a, **{**k, 'check_di
 MARK = uuid.uuid4().hex[:8]
 
 
-def format_entry(email):
-    # Imported lazily so the fail-then-pass run against the pre-fix code can
-    # still collect this module (the function did not exist there)
+def format_entry(email, **kwargs):
     from app.routers.suppressions import format_suppression_map_entry
-    return format_suppression_map_entry(email)
+    return format_suppression_map_entry(email, **kwargs)
 
 
 def _rspamd_match(map_line: str, recipient: str) -> bool:
-    """Match the way rspamd's regexp multimap does: unanchored search with
-    the pattern taken from between the slashes."""
     m = re.match(r'^/(.*)/(i?)$', map_line)
     body, flags = (m.group(1), m.group(2)) if m else (map_line, '')
     return re.search(body, recipient, re.IGNORECASE if 'i' in flags else 0) is not None
 
-
-# ---- the formatting itself (pure) ----
 
 def test_a_bare_address_becomes_an_exact_anchored_pattern():
     line = format_entry('e@example.com')
@@ -51,19 +41,23 @@ def test_regex_metacharacters_in_an_address_are_escaped():
 
 
 def test_a_legacy_domain_pattern_gets_its_anchors():
-    line = format_entry(r'/.+@example\.com/i')
-    assert line == r'/^.+@example\.com$/i'
+    line = format_entry(r'/.+@example\.com/i', allow_regex=True)
+    assert line == r'/^(?:.+@example\.com)$/i'
     assert _rspamd_match(line, 'user@example.com')
     assert not _rspamd_match(line, 'user@example.com.evil.net')
     assert not _rspamd_match(line, 'user@notexample.com.x')
 
 
-def test_an_already_anchored_pattern_is_left_alone():
-    line = format_entry(r'/^.+@example\.com$/i')
-    assert line == r'/^.+@example\.com$/i'
+def test_an_already_anchored_pattern_is_not_anchored_twice():
+    line = format_entry(r'/^.+@example\.com$/i', allow_regex=True)
+    assert line == r'/^(?:.+@example\.com)$/i'
 
 
-# ---- the sync writes the anchored form (fails on the old code) ----
+def test_a_regex_shaped_value_is_a_literal_unless_regex_is_allowed():
+    line = format_entry(r'/.+@example\.com/i')
+    assert line == r'/^/\.\+@example\\\.com/i$/i'
+    assert not _rspamd_match(line, 'user@example.com')
+
 
 def _postgres_available() -> bool:
     try:
@@ -95,9 +89,6 @@ def env():
 
 
 def test_sync_writes_lines_that_do_not_match_superstrings(env, monkeypatch):
-    """Seed a suppression shaped like the live incident and assert the line
-    the sync ships to Rspamd cannot hit an innocent superstring recipient.
-    On the old code the bare address was written and this fails."""
     from app.database import get_db_context
     from app.models import SpamSuppression
     from app.routers import suppressions as sup
@@ -137,7 +128,6 @@ def test_sync_writes_lines_that_do_not_match_superstrings(env, monkeypatch):
 
 
 def test_second_sync_with_unchanged_entries_skips_the_write(env, monkeypatch):
-    """The issue #80 no-rewrite optimization must recognize the new format."""
     from app.database import get_db_context
     from app.models import SpamSuppression
     from app.routers import suppressions as sup
@@ -169,8 +159,6 @@ def test_second_sync_with_unchanged_entries_skips_the_write(env, monkeypatch):
     assert state['writes'] == 1, 'identical managed content must not be rewritten'
 
 
-# ---- the maps editor flags dangerous manual entries ----
-
 def test_validation_warns_on_bare_addresses_but_does_not_block():
     from app.routers.rspamd_maps import validate_map_content
     findings = validate_map_content('\n'.join([
@@ -192,11 +180,7 @@ def test_validation_still_blocks_a_broken_regex():
     assert len(errors) == 1
 
 
-# ---- manual entries migrate automatically ----
-
 def test_manual_bare_entries_are_migrated_by_the_sync(env, monkeypatch):
-    """Installations in the field carry bare manual entries; the sync anchors
-    them on its own - no operator hand-editing."""
     from app.database import get_db_context
     from app.models import SpamSuppression
     from app.routers import suppressions as sup
@@ -249,8 +233,6 @@ def test_migrate_manual_map_line_shapes():
 
 
 def test_the_bare_address_detector_is_not_a_redos_vector():
-    """The detector itself must stay linear on hostile input (the same bug
-    class the project fixed for the abuse whitelist)."""
     import time
     from app.routers.suppressions import migrate_manual_map_line
     hostile = '!@!.' + '!.' * 5000
@@ -258,5 +240,4 @@ def test_the_bare_address_detector_is_not_a_redos_vector():
     assert migrate_manual_map_line(hostile) == hostile
     assert migrate_manual_map_line('a@' + 'b.' * 10000 + 'c') == 'a@' + 'b.' * 10000 + 'c'
     assert time.monotonic() - start < 0.5
-    # normal addresses still migrate
     assert migrate_manual_map_line('user@sub.example.com') == r'/^user@sub\.example\.com$/i'

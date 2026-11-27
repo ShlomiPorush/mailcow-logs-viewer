@@ -1,13 +1,3 @@
-"""Dovecot delivery correlation (issue #65).
-
-Postfix logs status=sent the moment it hands a message to Dovecot over LMTP,
-so a message dropped by a Sieve ``discard`` rule was shown as delivered. The
-dovecot_parser turns the LMTP/LDA lines the raw logs worker already collects
-into per-delivery verdicts, and correlate_dovecot_logs attaches them to the
-existing MessageCorrelation rows - flipping the final status to 'discarded'
-where Dovecot dropped the message, and pinning that verdict against every
-Postfix-driven job that would otherwise flip it back to 'delivered'.
-"""
 import asyncio
 import uuid
 from datetime import datetime, timedelta
@@ -37,8 +27,6 @@ def _lmtp(rest, user=USER, session='SessAbc123', pid='1234'):
     return f'lmtp({user})<{pid}><{session}>: {rest}'
 
 
-# ---------- parser: recognised line shapes ----------
-
 @pytest.mark.parametrize('rest,verdict,mailbox,detail', [
     ("sieve: msgid=<m@d>: stored mail into mailbox 'INBOX'", 'stored', 'INBOX', None),
     ("sieve: msgid=<m@d>: stored mail into mailbox 'Junk'", 'stored', 'Junk', None),
@@ -67,28 +55,25 @@ def test_parser_recognised_shapes(rest, verdict, mailbox, detail):
 
 
 def test_parser_real_server_lines():
-    """Ground truth captured from a live mailcow server."""
     stored = parse_dovecot_message(
-        'lmtp(13163@sendmail.co.il)<3698783><QFzrJ1zXpmpfcDgAiLK9ww>: sieve: '
-        'msgid=<20260913170323.CE9116E38E2@web.sendmail.co.il>: '
+        'lmtp(4711@example.com)<2814402><Xk3vR8pLqmZ2cDgAfQ7Tnw>: sieve: '
+        'msgid=<20260101120000.A1B2C3D4E5F@web.example.com>: '
         "stored mail into mailbox 'INBOX'")
     assert stored['verdict'] == 'stored'
     assert stored['mailbox'] == 'INBOX'
-    assert stored['recipient'] == '13163@sendmail.co.il'
-    assert stored['session'] == 'QFzrJ1zXpmpfcDgAiLK9ww'
-    assert stored['message_id'] == '20260913170323.CE9116E38E2@web.sendmail.co.il'
+    assert stored['recipient'] == '4711@example.com'
+    assert stored['session'] == 'Xk3vR8pLqmZ2cDgAfQ7Tnw'
+    assert stored['message_id'] == '20260101120000.A1B2C3D4E5F@web.example.com'
 
-    # Connection noise has no msgid and must be skipped cheaply
     assert parse_dovecot_message('lmtp(1015): Connect from 172.22.1.253') is None
     assert parse_dovecot_message(
         'lmtp(1015): Disconnect from 172.22.1.253: Logged out (state=READY)') is None
 
 
 def test_parser_ignores_imap_lines_with_msgid():
-    """IMAP expunge/delete lines carry msgid= but are not deliveries."""
     assert parse_dovecot_message(
-        'imap(dmarc@sendmail.co.il)<3700941><UBeVKGBbNuPAqBgB>: expunge: '
-        'box=INBOX, uid=1789, msgid=<f8768de4877d4210bf4c287cb04ad4cd@microsoft.com>, '
+        'imap(dmarc@example.com)<2816530><Hq7NcT2bWkZ4oPdE>: expunge: '
+        'box=INBOX, uid=1789, msgid=<3c9e51a07b2d4f68a1e0d7c4b5f29e83@example.net>, '
         'size=15600') is None
 
 
@@ -122,8 +107,6 @@ def test_parser_folder_names_with_spaces():
 
 
 def test_parser_hostile_content_passes_through_unmodified():
-    """The parser is not an escaping layer - it must hand hostile strings
-    through untouched; the API/frontend own the escaping."""
     folder = '<img src=x onerror=alert(1)>'
     parsed = parse_dovecot_message(
         _lmtp(f"sieve: msgid=<m@d>: stored mail into mailbox '{folder}'"))
@@ -134,8 +117,6 @@ def test_parser_hostile_content_passes_through_unmodified():
         _lmtp(f'sieve: msgid=<m@d>: rejected message from <s@d> ({reason})'))
     assert parsed['detail'] == reason
 
-
-# ---------- resolving per-delivery verdicts ----------
 
 def _ev(verdict, minute=0, session='S1', recipient=USER, mailbox=None):
     return {
@@ -151,9 +132,6 @@ def test_resolve_discard_only_session_is_discarded():
 
 
 def test_resolve_store_cancels_pending_discard_in_both_orders():
-    """Regression: Sieve's "discarded if not explicitly delivered" is cancelled
-    by a fileinto no matter which line the log shows first - the raw logs
-    worker inserts pages newest-first, so order is not reliable."""
     pending_then_store = [
         _ev('discard_pending', 0),
         _ev('stored', 1, mailbox='Archive'),
@@ -177,8 +155,6 @@ def test_resolve_explicit_discard_still_wins_over_store():
 
 
 def test_resolve_two_recipients_sharing_one_lmtp_session():
-    """Regression: Postfix delivers multiple recipients over one LMTP session;
-    every recipient logs with the same session id and needs its own verdict."""
     events = [
         _ev('stored', 0, session='Shared', recipient=f'a@{MARKER}', mailbox='INBOX'),
         _ev('discard_pending', 1, session='Shared', recipient=f'b@{MARKER}'),
@@ -196,8 +172,6 @@ def test_pick_worst_verdict_across_sessions():
     assert pick_worst_verdict([]) is None
 
 
-# ---------- database-backed job and precedence tests ----------
-
 def _postgres_available() -> bool:
     try:
         from app.database import engine
@@ -211,7 +185,7 @@ def _cleanup():
     from app.database import get_db_context
     from app.models import (MessageCorrelation, PostfixLog, RawServiceLog,
                             SystemSetting)
-    from app.scheduler import DOVECOT_WATERMARK_KEY
+    from app.scheduler import DOVECOT_PENDING_KEY, DOVECOT_WATERMARK_KEY
     with get_db_context() as db:
         db.query(RawServiceLog).filter(
             RawServiceLog.raw_data['message'].astext.like(f'%{MARKER}%')
@@ -221,12 +195,11 @@ def _cleanup():
         db.query(MessageCorrelation).filter(
             MessageCorrelation.message_id.like(f'%{MARKER}%')).delete(synchronize_session=False)
         db.query(SystemSetting).filter(
-            SystemSetting.key == DOVECOT_WATERMARK_KEY).delete(synchronize_session=False)
+            SystemSetting.key.in_((DOVECOT_WATERMARK_KEY, DOVECOT_PENDING_KEY))).delete(synchronize_session=False)
         db.commit()
 
 
 def _set_watermark_to_current_max():
-    """Pin the watermark so the job only walks the rows this test inserts."""
     from sqlalchemy import func
     from app.database import get_db_context
     from app.models import RawServiceLog, SystemSetting
@@ -325,7 +298,6 @@ def _run_dovecot_job():
 
 
 def test_job_flips_delivered_to_discarded_and_advances_watermark(env):
-    """The heart of the issue: Sieve discarded the message, Postfix said sent."""
     msgid = _msgid()
     key = _add_correlation(msgid, final_status='delivered')
     row_id = _add_raw_line(_lmtp(f'sieve: msgid=<{msgid}>: discarded message'))
@@ -352,14 +324,11 @@ def test_job_records_the_target_folder_without_touching_final_status(env):
 
 
 def test_job_applies_line_that_arrived_before_its_correlation(env):
-    """The dovecot line lands first, the correlation only exists on a later
-    cycle - the parked events must still be applied even though the watermark
-    has moved past the raw row."""
     msgid = _msgid()
     row_id = _add_raw_line(_lmtp(f'sieve: msgid=<{msgid}>: discarded message'))
 
     _run_dovecot_job()
-    assert _get_watermark() >= row_id  # watermark advances even when unmatched
+    assert _get_watermark() >= row_id
 
     key = _add_correlation(msgid, final_status='delivered')
     _run_dovecot_job()
@@ -381,17 +350,13 @@ def test_job_is_idempotent(env):
 
     assert (first.dovecot_status, first.final_status) == ('discarded', 'discarded')
     assert (second.dovecot_status, second.final_status) == ('discarded', 'discarded')
-    assert second.updated_at == first.updated_at  # second run wrote nothing
+    assert second.updated_at == first.updated_at
 
-
-# ---------- precedence: 'discarded' survives the Postfix-driven jobs ----------
 
 def test_recompute_keeps_discarded_over_a_late_sent_line(env):
-    """Regression for the freeze-fix seam (PR #115): the queue-driven recompute
-    derives 'delivered' from status=sent and must not resurrect the message."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
-    from app import scheduler as sched
+    from app.services import correlation_jobs
 
     msgid = _msgid()
     queue = uuid.uuid4().hex[:10].upper()
@@ -402,7 +367,7 @@ def test_recompute_keeps_discarded_over_a_late_sent_line(env):
     with get_db_context() as db:
         corr = db.query(MessageCorrelation).filter(
             MessageCorrelation.correlation_key == key).first()
-        sched._recompute_correlation_from_postfix(db, corr)
+        correlation_jobs.recompute_correlation_from_postfix(db, corr)
         db.commit()
 
     assert _get_correlation(key).final_status == 'discarded'
@@ -411,7 +376,7 @@ def test_recompute_keeps_discarded_over_a_late_sent_line(env):
 def test_recompute_lets_a_real_bounce_win_over_discarded(env):
     from app.database import get_db_context
     from app.models import MessageCorrelation
-    from app import scheduler as sched
+    from app.services import correlation_jobs
 
     msgid = _msgid()
     queue = uuid.uuid4().hex[:10].upper()
@@ -422,7 +387,7 @@ def test_recompute_lets_a_real_bounce_win_over_discarded(env):
     with get_db_context() as db:
         corr = db.query(MessageCorrelation).filter(
             MessageCorrelation.correlation_key == key).first()
-        sched._recompute_correlation_from_postfix(db, corr)
+        correlation_jobs.recompute_correlation_from_postfix(db, corr)
         db.commit()
 
     assert _get_correlation(key).final_status == 'bounced'
@@ -444,10 +409,8 @@ def test_update_final_status_job_skips_discarded(env):
 
 
 def test_arrival_driven_push_path_skips_discarded(env):
-    """PR #115 refreshes correlations when a status-bearing Postfix line
-    arrives; PUSH_SKIP_FINAL_STATUSES must keep it away from a discard."""
     from app.database import get_db_context
-    from app import scheduler as sched
+    from app.services import correlation_jobs
 
     msgid = _msgid()
     queue = uuid.uuid4().hex[:10].upper()
@@ -456,7 +419,7 @@ def test_arrival_driven_push_path_skips_discarded(env):
     _add_postfix_log(queue, 'sent', msgid=msgid)
 
     with get_db_context() as db:
-        updated, skipped = sched.refresh_correlations_for_queue_ids(db, [queue])
+        updated, skipped = correlation_jobs.refresh_correlations_for_queue_ids(db, [queue])
         db.commit()
 
     assert updated == 0
@@ -476,9 +439,9 @@ def test_complete_correlations_job_leaves_discarded_alone(env):
     assert sched.job_status['complete_correlations']['status'] == 'success'
 
     corr = _get_correlation(key)
-    assert corr.is_complete is True          # the linking work still happens
+    assert corr.is_complete is True
     assert corr.queue_id == queue
-    assert corr.final_status == 'discarded'  # but the verdict is kept
+    assert corr.final_status == 'discarded'
 
 
 def test_expire_job_leaves_discarded_alone(env, monkeypatch):
@@ -495,4 +458,4 @@ def test_expire_job_leaves_discarded_alone(env, monkeypatch):
 
     corr = _get_correlation(key)
     assert corr.final_status == 'discarded'
-    assert corr.is_complete is True  # marked done so it is not re-fetched forever
+    assert corr.is_complete is True

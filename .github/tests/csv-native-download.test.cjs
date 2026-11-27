@@ -33,6 +33,9 @@ function harness(status = 200, contentType = 'text/csv; charset=utf-8') {
         },
         showToast(message, type) { toasts.push({ message, type }); },
     });
+    const utils = readFileSync(join(__dirname, '../../frontend/utils.js'), 'utf8');
+    const errorStart = utils.indexOf('function uiApiErrorText(');
+    vm.runInContext(utils.slice(errorStart, utils.indexOf('\nconst uiUnsavedEntries', errorStart)), context);
     vm.runInContext(readFileSync(join(__dirname, '../../frontend/export.js'), 'utf8'), context);
     return { context, requests, downloads, toasts };
 }
@@ -44,7 +47,7 @@ test('preflight validates filters before a native download without buffering CSV
     assert.equal(state.requests[0].options.method, 'HEAD');
     assert.equal(state.downloads.length, 1);
     assert.equal(state.downloads[0].href, state.requests[0].url);
-    assert.equal(state.downloads[0].download, ''); // Use the server filename.
+    assert.equal(state.downloads[0].download, '');
     const params = new URL(state.downloads[0].href, 'https://example.com').searchParams;
     assert.equal(params.get('sender'), 'user@example.com');
     assert.equal(params.get('min_score'), '0');

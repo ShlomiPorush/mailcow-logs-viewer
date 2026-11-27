@@ -1,23 +1,4 @@
 #!/usr/bin/env python3
-"""Browser pass over every page of a running mailcow Logs Viewer.
-
-Opens each SPA route in headless Chromium, clicks every control that only
-switches what is shown (sub-tabs, views, date presets, filters), opens the
-detail views of the seeded data (smoke_seed.py) and fails on:
-
-  - an uncaught JavaScript error,
-  - an inline handler (onclick="fn()" and friends) whose function does not
-    exist at runtime, including handlers rendered from API data,
-  - an API call to a path the backend does not serve (checked against
-    /openapi.json, because the SPA catch-all answers unknown paths with 200),
-  - an API response of 404 or any 5xx that is not listed in EXPECTED_ERRORS.
-
-Buttons that act (run, save, delete, ban, release) are never clicked.
-
-Usage: python ui_smoke.py <base url>
-Run it with: UI_SMOKE=1 bash .github/scripts/smoke.sh <image tag>
-It runs inside mcr.microsoft.com/playwright/python; CI does not run it.
-"""
 import json
 import re
 import sys
@@ -25,6 +6,8 @@ import urllib.request
 from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
+
+from contract_rules import check_answer
 
 BASE = sys.argv[1].rstrip('/') if len(sys.argv) > 1 else 'http://localhost:8080'
 
@@ -47,17 +30,17 @@ SAFE_SELECTORS = '.settings-edit-tab'
 
 # API errors that are the correct answer in the smoke environment, where
 # mailcow is an unreachable placeholder. Each entry: (method, path regex, status, reason).
+# A read from mailcow that fails answers 502 (Bad Gateway); Fail2ban answers 503.
 MAILCOW_DOWN = 'reads from mailcow, which is an unreachable placeholder in the smoke test'
 EXPECTED_ERRORS = [
-    ('GET', r'^/api/status/(version|containers|mailcow-info|storage)$', 500, MAILCOW_DOWN),
-    ('GET', r'^/api/(fail2ban|queue|quarantine)$', 500, MAILCOW_DOWN),
-    ('GET', r'^/api/domains/all$', 500, MAILCOW_DOWN),
+    ('GET', r'^/api/status/(version|containers|mailcow-info|storage)$', 502, MAILCOW_DOWN),
+    ('GET', r'^/api/(queue|quarantine)$', 502, MAILCOW_DOWN),
+    ('GET', r'^/api/fail2ban$', 503, MAILCOW_DOWN),
+    ('GET', r'^/api/domains/all$', 502, MAILCOW_DOWN),
 ]
 
 MAX_CLICKS_PER_PAGE = 60
 
-# Runs in the page: clicks the next not-yet-clicked, visible control that is
-# safe to press, and returns its key (or null when there is none left).
 CLICK_NEXT_JS = r"""([safePattern, openPattern, selectors, openCap]) => {
     const state = (window.__uiSmoke ||= { seen: new Set(), perFn: {} });
     const safe = new RegExp(safePattern), open = new RegExp(openPattern);
@@ -87,8 +70,6 @@ CLICK_NEXT_JS = r"""([safePattern, openPattern, selectors, openCap]) => {
     return null;
 }"""
 
-# Runs in the page: every inline handler must resolve to a function. Uses the
-# Function constructor so top-level const/let functions are visible too.
 MISSING_HANDLERS_JS = r"""() => {
     const attrs = ['onclick', 'onchange', 'oninput', 'onsubmit', 'onkeyup', 'onkeydown'];
     const skip = new Set(['if', 'for', 'while', 'switch', 'return', 'typeof', 'function', 'new']);
@@ -116,11 +97,9 @@ def fetch(path):
         return r.read().decode('utf-8')
 
 
-def route_matchers():
-    """Regexes for every path the backend serves, from its OpenAPI schema."""
-    spec = json.loads(fetch('/openapi.json'))
+def route_matchers(spec):
     out = []
-    for p in spec['paths']:
+    for p in sorted(spec['paths'], key=lambda t: t.count('{')):
         parts = []
         for seg in p.strip('/').split('/'):
             if re.fullmatch(r'\{[^}]+:path\}', seg):
@@ -129,12 +108,11 @@ def route_matchers():
                 parts.append('[^/]+')
             else:
                 parts.append(re.escape(seg))
-        out.append(re.compile('^/' + '/'.join(parts) + '/?$'))
+        out.append((re.compile('^/' + '/'.join(parts) + '/?$'), p))
     return out
 
 
 def spa_routes():
-    """URL paths for every page the router accepts (router.js is the source)."""
     router = fetch('/static/router.js')
     valid = re.findall(r"'([^']+)'", re.search(r'const VALID_ROUTES = \[(.*?)\];', router, re.S).group(1))
     display = dict(re.findall(r"'([^']+)':\s*'([^']+)'",
@@ -146,10 +124,53 @@ def expected(method, path, status):
     return any(m == method and re.search(rx, path) and s == status for m, rx, s, _ in EXPECTED_ERRORS)
 
 
+SCALAR_FEATURES = ['Open API Client', 'Ask AI', 'Generate MCP', 'Connect MCP', 'Generate SDK',
+                   'Developer Tools', 'Share', 'Register', 'Deploy']
+SCALAR_CREDITS = {'https://scalar.com/?utm_source=powered-by&utm_medium=api-reference', 'https://www.scalar.com/'}
+
+
+def check_api_docs(browser):
+    problems, outside = [], set()
+    context = browser.new_context(viewport={'width': 1440, 'height': 900})
+    context.on('request', lambda r: urlparse(r.url).scheme in ('http', 'https')
+               and not r.url.startswith(BASE + '/') and outside.add(r.url))
+    page = context.new_page()
+
+    def check_page(step):
+        for href in page.eval_on_selector_all('a[href]', 'as => as.map(a => a.href)'):
+            host = (urlparse(href).hostname or '').rstrip('.')
+            if (host == 'scalar.com' or host.endswith('.scalar.com')) and href not in SCALAR_CREDITS:
+                problems.append(f'{step}: link to {href}')
+        text = page.evaluate('document.body.innerText')
+        problems.extend(f"{step}: Scalar's '{t}' is shown" for t in SCALAR_FEATURES if t in text)
+
+    page.goto(f'{BASE}/docs', wait_until='networkidle', timeout=60000)
+    page.wait_for_selector("a[href*='GET/api/health']", state='attached', timeout=30000)
+    if page.locator('.darklight-reference').count() != 1:
+        problems.append('more than one reference on the page')
+    check_page('reference')
+
+    page.goto(f'{BASE}/docs#GET/api/health', wait_until='networkidle')
+    page.locator("section[id$='GET/api/health']").get_by_role('button', name='Test Request').first.click()
+    page.get_by_role('button', name='Send').first.click()
+    page.wait_for_load_state('networkidle')
+    page.wait_for_timeout(500)
+    check_page('Test Request')
+    if '200 OK' not in page.locator('[role=dialog]').first.inner_text():
+        problems.append('Test Request on GET /api/health did not show 200 OK')
+
+    problems.extend(f'request outside the app: {u}' for u in sorted(outside))
+    context.close()
+    print(f'  docs: {"problems found" if problems else "Scalar stays on this server, Test Request works"}')
+    return problems
+
+
 def main():
-    routes = route_matchers()
+    spec = json.loads(fetch('/openapi.json'))
+    routes = route_matchers(spec)
     pages = spa_routes()
     failures, warnings = [], []
+    checked, skipped = set(), {}
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
@@ -168,11 +189,30 @@ def main():
             if not u.path.startswith('/api/'):
                 return
             method = resp.request.method
-            if not any(rx.match(u.path) for rx in routes):
+            template = next((t for rx, t in routes if rx.match(u.path)), None)
+            if template is None:
                 fail(f'{method} {u.path}: the backend has no such route')
-            elif resp.status == 404 or resp.status >= 500:
+                return
+            if resp.status == 404 or resp.status >= 500:
                 if not expected(method, u.path, resp.status):
                     fail(f'{method} {u.path}: HTTP {resp.status}')
+            operation = (spec['paths'].get(template) or {}).get(method.lower())
+            if not operation:
+                return
+            try:
+                body = resp.body()
+            except Exception:
+                body = None if resp.status < 300 or resp.status >= 400 else b''
+            outcome, reason = check_answer(operation, spec.get('components', {}), resp.status,
+                                           resp.headers.get('content-type', ''), body)
+            name = f'{method} {template}'
+            if outcome == 'checked':
+                checked.add(name)
+            elif outcome == 'skipped':
+                skipped.setdefault(name, reason)
+            else:
+                checked.add(name)
+                fail(f'{method} {u.path}: {reason}')
         page.on('response', on_response)
 
         def check_handlers():
@@ -187,10 +227,6 @@ def main():
 
             clicked = set()
             for _ in range(MAX_CLICKS_PER_PAGE):
-                # Re-query each time: a click may re-render the page. The click
-                # is dispatched on the element itself so an open modal or
-                # overlay cannot swallow it; handler exceptions still surface
-                # as 'pageerror'.
                 target = page.evaluate(CLICK_NEXT_JS, [SAFE_CLICK.pattern, OPEN_CLICK.pattern, SAFE_SELECTORS, OPEN_CAP])
                 if not target:
                     break
@@ -202,8 +238,15 @@ def main():
             print(f'  {route}: loaded, {len(clicked)} controls clicked'
                   + (f", opened: {', '.join(opened)}" if opened else ''))
 
+        where['page'] = 'docs'
+        for problem in check_api_docs(browser):
+            fail(problem)
         browser.close()
 
+    unchecked = {name: why for name, why in skipped.items() if name not in checked}
+    print(f'\n  answers checked against /openapi.json: {len(checked)} operations; not checked: {len(unchecked)}')
+    for name, why in sorted(unchecked.items()):
+        print(f'    not checked: {name} ({why})')
     for w in dict.fromkeys(warnings):
         print(f'  warning {w}')
     if failures:

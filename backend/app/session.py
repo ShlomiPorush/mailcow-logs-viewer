@@ -1,44 +1,57 @@
-"""
-Session management for OAuth2 authentication
-Uses HTTP-only cookies with server-side session storage
-"""
 import logging
+import math
 import secrets
 import time
+from collections import OrderedDict
 from threading import RLock
-from typing import Dict, Optional, Any
-from datetime import datetime, timedelta
+from typing import Callable, Dict, NamedTuple, Optional, Any, Tuple
 from fastapi import Request, Response
-from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from itsdangerous import URLSafeTimedSerializer, BadSignature
 
+from . import config as _config
 from .config import settings
 
 logger = logging.getLogger(__name__)
 
-# In-memory session store
-# In production, consider using Redis for scalability
 _session_store: Dict[str, Dict[str, Any]] = {}
 _session_lock = RLock()
 _next_capacity_cleanup = 0.0
+_auth_generation = 0
+
+SESSION_EXPIRED = "session_expired"
+SESSION_IDLE = "session_idle"
+SESSION_ACCESS_CHANGED = "access_changed"
+_TOMBSTONE_SECONDS = 600
+_tombstones: "OrderedDict[str, Tuple[str, float]]" = OrderedDict()
+
+
+def _now() -> float:
+    return time.time()
 
 
 class SessionCapacityError(Exception):
-    """No new sessions can be admitted without removing a live session."""
+    pass
 
 
-# Session cookie name
+class SessionRevokedError(Exception):
+    pass
+
+
+class SessionState(NamedTuple):
+    key: Optional[str]
+    data: Optional[Dict[str, Any]]
+    ended: Optional[str]
+
+
+_NO_SESSION = SessionState(None, None, None)
+
 SESSION_COOKIE_NAME = "session_id"
 
 
-# Fallback key when SESSION_SECRET_KEY is unset - generated ONCE per process.
-# (Generating a fresh key per call would sign and verify with different keys,
-# silently invalidating every OAuth2 session.) Sessions still won't survive a
-# restart without a configured key, matching the in-memory session store.
 _generated_secret_key: str = ""
 
 
 def get_session_secret_key() -> str:
-    """Get the configured session secret key, or a stable per-process fallback"""
     with _session_lock:
         global _generated_secret_key
         if not settings.session_secret_key:
@@ -53,22 +66,102 @@ def get_session_secret_key() -> str:
 
 
 def get_serializer() -> URLSafeTimedSerializer:
-    """Get URL-safe timed serializer for signing session IDs"""
     return URLSafeTimedSerializer(get_session_secret_key())
 
 
-def create_session(user_info: Dict[str, Any]) -> str:
-    """
-    Create a new session and return session ID
+def _unsign(session_id: Optional[str]) -> Optional[str]:
+    if not session_id:
+        return None
+    try:
+        key = get_serializer().loads(session_id)
+    except BadSignature as e:
+        logger.debug(f"Invalid session signature: {e}")
+        return None
+    return key if isinstance(key, str) else None
 
-    Args:
-        user_info: User information from OAuth2 provider
 
-    Returns:
-        Session ID (signed)
-    """
+def _longest_hours(source=None) -> int:
+    return max(1, int((source or settings).session_expiry_hours))
+
+
+def _idle_seconds(source=None) -> int:
+    return max(5, min(1440, int((source or settings).session_idle_timeout_minutes))) * 60
+
+
+def _longest_seconds(record: Dict[str, Any]) -> int:
+    return min(int(record["issued_hours"]), _longest_hours()) * 3600
+
+
+def _end_reason(record: Dict[str, Any], now: float) -> Optional[str]:
+    if now - record["login_at"] >= _longest_seconds(record):
+        return SESSION_EXPIRED
+    if settings.session_idle_enabled and now - record["active_at"] >= _idle_seconds():
+        return SESSION_IDLE
+    return None
+
+
+def _end(key: str, reason: str, now: float) -> None:
+    _session_store.pop(key, None)
+    _tombstones.pop(key, None)
+    _tombstones[key] = (reason, now + _TOMBSTONE_SECONDS)
+    cap = max(0, int(settings.session_max_entries))
+    while len(_tombstones) > cap:
+        _tombstones.popitem(last=False)
+    logger.debug(f"Session {key[:8]}... ended: {reason}")
+
+
+def _tombstone(key: str, now: float) -> Optional[str]:
+    entry = _tombstones.get(key)
+    if entry is None:
+        return None
+    reason, until = entry
+    if now >= until:
+        _tombstones.pop(key, None)
+        return None
+    return reason
+
+
+def _check(key: Optional[str]) -> SessionState:
+    if not key:
+        return _NO_SESSION
+    with _session_lock:
+        now = _now()
+        record = _session_store.get(key)
+        if record is None:
+            return SessionState(None, None, _tombstone(key, now))
+        reason = _end_reason(record, now)
+        if reason:
+            _end(key, reason, now)
+            return SessionState(None, None, reason)
+        return SessionState(key, record, None)
+
+
+def _publish_settings(new: Any, assign: Callable[[], None]) -> None:
+    with _session_lock:
+        now = _now()
+        idle_was_on = bool(settings.session_idle_enabled)
+        for key in list(_session_store):
+            reason = _end_reason(_session_store[key], now)
+            if reason:
+                _end(key, reason, now)
+        assign()
+        if not idle_was_on and bool(getattr(new, "session_idle_enabled", False)):
+            for record in _session_store.values():
+                record["active_at"] = now
+        for key in list(_session_store):
+            reason = _end_reason(_session_store[key], now)
+            if reason:
+                _end(key, reason, now)
+
+
+_config.set_settings_publisher(_publish_settings)
+
+
+def create_session(user_info: Dict[str, Any], *, generation: int, principal: Dict[str, Any]) -> str:
     with _session_lock:
         global _next_capacity_cleanup
+        if generation != _auth_generation:
+            raise SessionRevokedError("Sign-in settings changed after the request was admitted")
         if len(_session_store) >= settings.session_max_entries:
             now = time.monotonic()
             if now >= _next_capacity_cleanup:
@@ -77,17 +170,15 @@ def create_session(user_info: Dict[str, Any]) -> str:
             if len(_session_store) >= settings.session_max_entries:
                 raise SessionCapacityError("Login capacity reached. Try again later.")
         session_id = secrets.token_urlsafe(32)
-        expires_at = datetime.utcnow() + timedelta(hours=settings.session_expiry_hours)
-
-        session_data = {
+        now = _now()
+        _session_store[session_id] = {
             "user_info": user_info,
-            "created_at": datetime.utcnow().isoformat(),
-            "expires_at": expires_at.isoformat(),
+            "login_at": now,
+            "active_at": now,
+            "issued_hours": _longest_hours(),
+            "principal": principal,
         }
 
-        _session_store[session_id] = session_data
-
-        # Sign the session ID
         serializer = get_serializer()
         signed_session_id = serializer.dumps(session_id)
 
@@ -97,55 +188,14 @@ def create_session(user_info: Dict[str, Any]) -> str:
 
 
 def get_session(session_id: str) -> Optional[Dict[str, Any]]:
-    """
-    Get session data by session ID
-
-    Args:
-        session_id: Signed session ID from cookie
-
-    Returns:
-        Session data or None if invalid/expired
-    """
     with _session_lock:
-        try:
-            # Verify and unsign the session ID
-            serializer = get_serializer()
-            unsigned_session_id = serializer.loads(session_id, max_age=settings.session_expiry_hours * 3600)
-        except (BadSignature, SignatureExpired) as e:
-            logger.debug(f"Invalid session signature: {e}")
-            return None
-
-        # Get session from store
-        session_data = _session_store.get(unsigned_session_id)
-        if not session_data:
-            logger.debug(f"Session {unsigned_session_id[:8]}... not found in store")
-            return None
-
-        # Check expiration
-        expires_at = datetime.fromisoformat(session_data["expires_at"])
-        if datetime.utcnow() > expires_at:
-            logger.debug(f"Session {unsigned_session_id[:8]}... expired")
-            _session_store.pop(unsigned_session_id, None)
-            return None
-
-        return session_data
+        return _check(_unsign(session_id)).data
 
 
 def delete_session(session_id: str) -> bool:
-    """
-    Delete a session
-
-    Args:
-        session_id: Signed session ID from cookie
-
-    Returns:
-        True if session was deleted, False otherwise
-    """
     with _session_lock:
-        try:
-            serializer = get_serializer()
-            unsigned_session_id = serializer.loads(session_id, max_age=settings.session_expiry_hours * 3600)
-        except (BadSignature, SignatureExpired):
+        unsigned_session_id = _unsign(session_id)
+        if unsigned_session_id is None:
             return False
 
         if unsigned_session_id in _session_store:
@@ -156,33 +206,95 @@ def delete_session(session_id: str) -> bool:
         return False
 
 
+def revoke_all_sessions_keeping(keep: Optional[Dict[str, Any]], admitted: Optional[int]) -> Tuple[int, Optional[str]]:
+    global _auth_generation
+    with _session_lock:
+        key = next((k for k, record in _session_store.items() if record is keep), None) if keep is not None else None
+        if key is not None and (admitted != _auth_generation or _check(key).data is None):
+            key = None
+        count = len(_session_store)
+        _session_store.clear()
+        _auth_generation += 1
+        generation = _auth_generation
+        signed = None
+        if key is not None:
+            new_key = secrets.token_urlsafe(32)
+            _session_store[new_key] = keep
+            signed = get_serializer().dumps(new_key)
+    logger.info(f"Revoked {count} session(s) after an authentication settings change")
+    return generation, signed
+
+
+def auth_generation() -> int:
+    with _session_lock:
+        return _auth_generation
+
+
+def session_state(request: Request) -> SessionState:
+    return _check(_unsign(request.cookies.get(SESSION_COOKIE_NAME)))
+
+
+def session_key_from_request(request: Request) -> Optional[str]:
+    return session_state(request).key
+
+
+def is_session_active(key: str) -> bool:
+    return _check(key).data is not None
+
+
+def session_by_key(key: Optional[str]) -> SessionState:
+    return _check(key)
+
+
+def end_session(key: str, reason: str) -> None:
+    with _session_lock:
+        if key in _session_store:
+            _end(key, reason, _now())
+
+
+def end_sessions_where(match: Callable[[Dict[str, Any]], bool], reason: str) -> int:
+    with _session_lock:
+        now = _now()
+        keys = [k for k, record in _session_store.items() if match(record)]
+        for key in keys:
+            _end(key, reason, now)
+        return len(keys)
+
+
 def get_session_from_request(request: Request) -> Optional[Dict[str, Any]]:
-    """
-    Get session data from request cookie
+    return session_state(request).data
 
-    Args:
-        request: FastAPI request object
 
-    Returns:
-        Session data or None if not found/invalid
-    """
-    session_id = request.cookies.get(SESSION_COOKIE_NAME)
-    if not session_id:
-        return None
+def _limits(record: Dict[str, Any], now: float) -> Dict[str, Any]:
+    longest_left = record["login_at"] + _longest_seconds(record) - now
+    idle_on = bool(settings.session_idle_enabled)
+    idle = _idle_seconds() if idle_on else None
+    return {
+        "longest_seconds_left": max(0, math.ceil(longest_left)),
+        "idle_enabled": idle_on,
+        "idle_timeout_seconds": idle,
+        "idle_seconds_left": max(0, math.ceil(record["active_at"] + idle - now)) if idle_on else None,
+    }
 
-    return get_session(session_id)
+
+def session_limits(request: Request) -> Optional[Dict[str, Any]]:
+    with _session_lock:
+        state = session_state(request)
+        return _limits(state.data, _now()) if state.data is not None else None
+
+
+def record_activity(request: Request) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+    with _session_lock:
+        state = session_state(request)
+        if state.data is None:
+            return None, state.ended
+        now = _now()
+        state.data["active_at"] = now
+        return _limits(state.data, now), None
 
 
 def is_secure_request(request: Optional[Request]) -> bool:
-    """Whether this request reached us over HTTPS.
-
-    The Secure flag has to follow the actual deployment: a Secure cookie is
-    silently dropped by the browser on plain HTTP, which would lock out every
-    self-hosted instance served over http:// on a LAN. Behind a reverse proxy
-    the scheme arrives in X-Forwarded-Proto.
-    """
     if request is None:
-        # No request context: assume HTTPS unless the app runs in debug mode.
         return settings.debug is False
     forwarded = request.headers.get("x-forwarded-proto", "")
     if forwarded:
@@ -190,36 +302,29 @@ def is_secure_request(request: Optional[Request]) -> bool:
     return request.url.scheme == "https"
 
 
+def _cookie_max_age(session_id: str) -> int:
+    with _session_lock:
+        record = _session_store.get(_unsign(session_id) or "")
+        if record is None:
+            return _longest_hours() * 3600
+        return max(1, math.ceil(record["login_at"] + int(record["issued_hours"]) * 3600 - _now()))
+
+
 def set_session_cookie(
     response: Response, session_id: str, request: Optional[Request] = None
 ) -> None:
-    """
-    Set session cookie in response
-
-    Args:
-        response: FastAPI response object
-        session_id: Signed session ID
-        request: Incoming request, used to decide on the Secure flag
-    """
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=session_id,
-        max_age=settings.session_expiry_hours * 3600,
+        max_age=_cookie_max_age(session_id),
         httponly=True,
         secure=is_secure_request(request),
-        samesite="lax",  # Lax for CSRF protection while allowing navigation
+        samesite="lax",
         path="/",
     )
 
 
 def clear_session_cookie(response: Response, request: Optional[Request] = None) -> None:
-    """
-    Clear session cookie in response
-
-    Args:
-        response: FastAPI response object
-        request: Incoming request, used to decide on the Secure flag
-    """
     response.delete_cookie(
         key=SESSION_COOKIE_NAME,
         path="/",
@@ -230,26 +335,18 @@ def clear_session_cookie(response: Response, request: Optional[Request] = None) 
 
 
 def cleanup_expired_sessions() -> int:
-    """
-    Clean up expired sessions from store
-    Call this periodically to prevent memory leaks
-
-    Returns:
-        Number of sessions cleaned up
-    """
     with _session_lock:
-        now = datetime.utcnow()
-        expired_sessions = []
+        now = _now()
+        ended = 0
+        for key in list(_session_store):
+            reason = _end_reason(_session_store[key], now)
+            if reason:
+                _end(key, reason, now)
+                ended += 1
+        for key in [k for k, (_reason, until) in _tombstones.items() if now >= until]:
+            _tombstones.pop(key, None)
 
-        for session_id, session_data in list(_session_store.items()):
-            expires_at = datetime.fromisoformat(session_data["expires_at"])
-            if now > expires_at:
-                expired_sessions.append(session_id)
+        if ended:
+            logger.debug(f"Cleaned up {ended} expired sessions")
 
-        for session_id in expired_sessions:
-            _session_store.pop(session_id, None)
-
-        if expired_sessions:
-            logger.debug(f"Cleaned up {len(expired_sessions)} expired sessions")
-
-        return len(expired_sessions)
+        return ended

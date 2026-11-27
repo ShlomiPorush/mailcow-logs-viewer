@@ -1,555 +1,676 @@
-/**
- * Spam Filter module
- * Handles Rspamd Maps editor and Suppression list management
- */
-
-// =============================================================================
-// STATE
-// =============================================================================
-let spamFilterSubTab = 'suppressions'; // Fix #3: Suppressions first
 let rspamdMapsData = null;
 let rspamdMapsConfigured = false;
 let suppressionPage = 1;
 
-// =============================================================================
-// TAB SWITCHING
-// =============================================================================
-
-function loadSpamFilter() {
-    console.log('Loading Spam Filter...');
-    // Fix #2: Always ensure the correct sub-tab is visible before loading data
-    spamFilterSwitchSubTab(spamFilterSubTab);
+function loadSuppressionsTab() {
+    loadSuppressions();
+    loadSuppressionStats();
 }
 
-function spamFilterSwitchSubTab(tab) {
-    spamFilterSubTab = tab;
-    
-    // Update sub-tab buttons
-    document.querySelectorAll('[id^="spam-subtab-"]').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    const activeBtn = document.getElementById(`spam-subtab-${tab}`);
-    if (activeBtn) activeBtn.classList.add('active');
-    
-    // Toggle content
-    const mapsContent = document.getElementById('spam-filter-maps-content');
-    const suppressionsContent = document.getElementById('spam-filter-suppressions-content');
-    
-    if (tab === 'maps') {
-        if (mapsContent) mapsContent.classList.remove('hidden');
-        if (suppressionsContent) suppressionsContent.classList.add('hidden');
-        loadRspamdMaps();
-    } else {
-        if (mapsContent) mapsContent.classList.add('hidden');
-        if (suppressionsContent) suppressionsContent.classList.remove('hidden');
-        loadSuppressions();
-        loadSuppressionStats();
-    }
-}
-
-/**
- * Smart refresh for Spam Filter page (called by auto-refresh timer).
- * Only refreshes the suppressions sub-tab silently;
- * does NOT refresh maps editor (would discard user edits).
- */
-async function smartRefreshSpamFilter() {
-    // Only auto-refresh the suppressions tab, not the maps editor
-    if (spamFilterSubTab !== 'suppressions') return;
-    
-    // Don't refresh if a modal is open (add/edit suppression)
+async function smartRefreshSuppressions() {
     const modal = document.getElementById('add-suppression-modal');
     if (modal && !modal.classList.contains('hidden')) return;
     const editModal = document.getElementById('edit-suppression-modal');
     if (editModal && !editModal.classList.contains('hidden')) return;
-    
+    if (suppressionListLoading || suppressionLoadingMore) return;
+
     await loadSuppressions();
     await loadSuppressionStats();
 }
 
-// =============================================================================
-// RSPAMD MAPS
-// =============================================================================
+let rspamdMapToOpen = null;
+
+function openRspamdMap(filename) {
+    rspamdMapToOpen = filename;
+    navigateTo('rspamd');
+}
 
 async function loadRspamdMaps() {
+    if (typeof setPageCrumbs === 'function') setPageCrumbs('rspamd', '', null, null);
     const container = document.getElementById('rspamd-maps-list');
+    const open = rspamdMapToOpen;
+    rspamdMapToOpen = null;
     
     try {
         const response = await authenticatedFetch('/api/rspamd/maps');
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        if (!response.ok) throw await responseError(response);
         
         const data = await response.json();
         rspamdMapsConfigured = data.configured;
         rspamdMapsData = data.maps || [];
         
         if (!data.configured) {
-            container.innerHTML = `
-                <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-6 text-center">
-                    <svg class="w-12 h-12 mx-auto mb-3 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"></path>
-                    </svg>
-                    <h3 class="text-lg font-semibold text-yellow-800 dark:text-yellow-200 mb-2">Rspamd Not Configured</h3>
-                    <p class="text-yellow-700 dark:text-yellow-300 mb-4">${escapeHtml(data.message || 'Set RSPAMD_PASSWORD in Settings to enable Rspamd map management.')}</p>
-                    <button onclick="navigateTo('settings')" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg text-sm">
-                        Go to Settings
-                    </button>
-                </div>
-            `;
+            container.innerHTML = uiLocked('Rspamd Not Configured',
+                escapeHtml(data.message || 'Set RSPAMD_PASSWORD in Settings to enable Rspamd map management.'),
+                `<button data-acts="admin" type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings')">Go to Settings</button>`);
             return;
         }
         
         if (data.error) {
-            container.innerHTML = `
-                <div class="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 text-center">
-                    <p class="text-red-700 dark:text-red-300">${escapeHtml(data.error)}</p>
-                </div>
-            `;
+            container.innerHTML = `<p class="ui-empty ui-panel ui-text-fail">${escapeHtml(data.error)}</p>`;
             return;
         }
         
+        rspamdMapsCanSave = data.rw_key_configured !== false;
         renderRspamdMapsList(data.maps, data.rw_key_configured);
+        if (open && rspamdMapsData.some(m => m.filename === open)) openMapEditor(open);
         
     } catch (error) {
         console.error('Failed to load Rspamd maps:', error);
-        container.innerHTML = `<p class="text-red-500 text-center py-8">Failed to load maps: ${escapeHtml(error.message)}</p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load maps: ${escapeHtml(uiSentence(uiErrorText(error)))} <button type="button" class="ui-link-row ui-link" onclick="loadRspamdMaps()">Try again</button></p>`;
     }
 }
 
+async function refreshRspamdMaps() {
+    const container = document.getElementById('rspamd-maps-list');
+    if (!container) return;
+    if (container.querySelector('#map-entry-count, textarea') || /Loading map content/.test(container.textContent)) return;
+    if (!container.querySelector('.ui-map-table')) return loadRspamdMaps();
+    const listShown = () => container.querySelector('.ui-map-table') && !uiTextHeld(container);
+    if (!listShown()) return;
+    try {
+        const response = await authenticatedFetch('/api/rspamd/maps', { timeout: PAGE_REFRESH_TIMEOUT });
+        if (!response.ok) return;
+        const data = await response.json();
+        if (!listShown() || !data.configured || data.error) return;
+        if (JSON.stringify(data.maps || []) === JSON.stringify(rspamdMapsData) && (data.rw_key_configured !== false) === rspamdMapsCanSave) return;
+        rspamdMapsData = data.maps || [];
+        rspamdMapsCanSave = data.rw_key_configured !== false;
+        renderRspamdMapsList(data.maps || [], data.rw_key_configured);
+    } catch (error) {
+        console.error('Rspamd maps refresh failed:', error);
+    }
+}
+
+let rspamdMapsCanSave = true;
+const RSPAMD_MAPS_READONLY_TEXT = '<code>MAILCOW_API_KEY_RW</code> is not configured, so maps can be viewed but not saved. Add a read-write mailcow API key in Settings → Mailcow → Connection.';
+
 function renderRspamdMapsList(maps, rwKeyConfigured) {
     const container = document.getElementById('rspamd-maps-list');
-    
-    // Group maps by category
+
     const categories = {
-        sender: { label: 'Sender Rules', icon: '📤', maps: [] },
-        recipient: { label: 'Recipient Rules', icon: '📥', maps: [] },
-        content: { label: 'Content Rules', icon: '📝', maps: [] },
-        system: { label: 'System', icon: '⚙️', maps: [] }
+        sender: { label: 'Sender Rules', maps: [] },
+        recipient: { label: 'Recipient Rules', maps: [] },
+        content: { label: 'Content Rules', maps: [] },
+        system: { label: 'System', maps: [] }
     };
-    
+
     maps.forEach(m => {
         const cat = categories[m.category] || categories.system;
         cat.maps.push(m);
     });
-    
+
     let html = '';
-    
-    for (const [key, cat] of Object.entries(categories)) {
+
+    for (const cat of Object.values(categories)) {
         if (cat.maps.length === 0) continue;
-        
+
         html += `
-            <div class="mb-6">
-                <h3 class="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-3 flex items-center gap-2">
-                    <span>${cat.icon}</span> ${cat.label}
-                </h3>
-                <div class="space-y-2">
+            <section class="ui-sec-block">
+                <div class="ui-list-head"><h2 class="ui-h2">${cat.label}</h2> <span class="ui-count">${cat.maps.length}</span></div>
+                <div class="ui-table ui-stack ui-map-table">
                     ${cat.maps.map(m => {
-                        // Use our metadata description, not the rspamd technical description
-                        const displayDesc = _getMapMetaDescription(m.filename) || m.description || '';
+                        const displayDesc = m.description || '';
                         return `
-                        <div class="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg hover:border-blue-300 dark:hover:border-blue-600 transition cursor-pointer"
-                             onclick="openMapEditor('${escapeJsArg(m.filename)}')">
-                            <div class="p-4 flex items-center justify-between">
-                                <div class="flex-1 min-w-0">
-                                    <div class="flex items-center gap-2 mb-1">
-                                        <h4 class="font-medium text-gray-900 dark:text-white truncate">${escapeHtml(m.name)}</h4>
-                                        ${m.managed_by_suppression ? '<span class="px-2 py-0.5 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full">Auto-managed</span>' : ''}
-                                    </div>
-                                    <p class="text-sm text-gray-500 dark:text-gray-400 truncate">${escapeHtml(displayDesc)}</p>
-                                </div>
-                                <div class="flex items-center gap-3 ml-4 flex-shrink-0">
-                                    ${m.loaded !== undefined ? `
-                                        <span class="inline-flex items-center gap-1 text-xs ${m.loaded ? 'text-green-600 dark:text-green-400' : 'text-gray-400'}">
-                                            <span class="w-2 h-2 rounded-full ${m.loaded ? 'bg-green-500' : 'bg-gray-300'}"></span>
-                                            ${m.loaded ? 'Loaded' : 'Not loaded'}
-                                        </span>
-                                    ` : ''}
-                                    <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                                    </svg>
-                                </div>
+                        <div class="ui-tr" role="button" tabindex="0" data-row-open onclick="if (!uiRowHeld(event)) openMapEditor('${escapeJsArg(m.filename)}')">
+                            <div class="ui-td ui-q-who">
+                                <div>${escapeHtml(m.name)} ${m.managed_by_suppression ? uiTag('Auto-managed', 'info') : ''}</div>
+                                <small title="${escapeHtml(displayDesc)}">${escapeHtml(displayDesc)}</small>
                             </div>
+                            <span class="ui-td ui-mono ui-muted">${escapeHtml(m.filename)}</span>
+                            <span class="ui-td">${m.loaded !== undefined
+                                ? `<i class="ui-mdot ${m.loaded ? 'ui-mdot-ok' : ''}"></i> ${m.loaded ? 'Loaded' : 'Not loaded'}`
+                                : ''}</span>
+                            <span class="ui-td ui-td-end ui-muted" aria-hidden="true">›</span>
                         </div>
                     `}).join('')}
                 </div>
-            </div>
+            </section>
         `;
     }
-    
-    if (!rwKeyConfigured) {
-        html = `
-            <div class="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4 text-sm text-blue-700 dark:text-blue-300">
-                <strong>Read-Only Mode:</strong> MAILCOW_API_KEY_RW is not configured. You can view maps but cannot save changes.
-            </div>
-        ` + html;
+
+    if (!rwKeyConfigured && userCan('rspamd', 'write')) {
+        html = `<div class="ui-list-note ui-flush">${uiLocked('Read-Only Mode', RSPAMD_MAPS_READONLY_TEXT)}</div>` + html;
     }
-    
+
     container.innerHTML = html;
 }
 
+function rspamdMapCrumbs(name) {
+    if (typeof setPageCrumbs === 'function') setPageCrumbs('rspamd', '', 'rspamdLeaveMap()', [name]);
+    return `<nav class="ui-crumbs ui-crumbs-local" aria-label="Breadcrumb">
+        <button type="button" class="ui-crumb" onclick="rspamdLeaveMap()">Rspamd</button>
+        <span class="ui-crumb-sep" aria-hidden="true">/</span>
+        <span class="ui-crumb-current">${escapeHtml(name)}</span>
+    </nav>`;
+}
+
 async function openMapEditor(filename) {
+    mapEditorOpened += 1;
     const container = document.getElementById('rspamd-maps-list');
-    
-    container.innerHTML = `
-        <div class="text-center py-8">
-            <div class="loading mx-auto mb-4"></div>
-            <p class="text-gray-500 dark:text-gray-400">Loading map content...</p>
-        </div>
-    `;
-    
+
+    container.innerHTML = '<div class="ui-loading" role="status"><div class="loading"></div><p>Loading map content...</p></div>';
+
     try {
-        const response = await authenticatedFetch(`/api/rspamd/maps/${filename}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        
+        const response = await authenticatedFetch(`/api/rspamd/maps/${encodeURIComponent(filename)}`);
+        if (!response.ok) throw await responseError(response);
+
         const data = await response.json();
         const meta = data.metadata || {};
-        
+        const mayEdit = userCan('rspamd', 'write');
+        const canSave = rspamdMapsCanSave && mayEdit;
+        mapEditorSaved = data.content || '';
+        mapEditorHash = data.content_hash || null;
+
         container.innerHTML = `
-            <div class="mb-4">
-                <button onclick="loadRspamdMaps()" class="inline-flex items-center gap-1.5 text-sm text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path>
-                    </svg>
-                    Back to Maps List
-                </button>
-            </div>
-            
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 overflow-hidden">
-                <div class="px-6 py-4 border-b border-gray-200 dark:border-gray-700 flex flex-wrap items-center justify-between gap-2">
+            ${rspamdMapCrumbs(meta.name || filename)}
+
+            <section class="ui-panel">
+                <div class="ui-panel-head ui-rl-head">
                     <div>
-                        <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${escapeHtml(meta.name || filename)}</h3>
-                        <p class="text-sm text-gray-500 dark:text-gray-400">${escapeHtml(meta.description || '')}</p>
-                        <p class="text-xs text-gray-400 dark:text-gray-500 font-mono mt-1">${escapeHtml(filename)}</p>
+                        <h3 class="ui-h2">${escapeHtml(meta.name || filename)}</h3>
+                        <p class="ui-muted">${escapeHtml(meta.description || '')}</p>
+                        <p class="ui-mono ui-muted">${escapeHtml(filename)}</p>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <span id="map-entry-count" class="text-sm text-gray-500 dark:text-gray-400">${data.entry_count} entries</span>
+                    <div class="ui-rl-tools">
+                        <span id="map-entry-count" class="ui-muted">${uiCountLabel(data.entry_count, 'entry', 'entries')}</span>
                         <span id="map-validation-status"></span>
                     </div>
                 </div>
-                <div class="p-6">
-                    ${meta.supports_regex ? `
-                        <div class="mb-4">
-                            <button onclick="toggleRegexWizard()" id="regex-wizard-toggle" class="inline-flex items-center gap-2 px-3 py-2 text-sm font-medium rounded-lg border border-blue-300 dark:border-blue-600 text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-900/20 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6"></path>
-                                </svg>
-                                Regex Wizard
-                            </button>
-                            <div id="regex-wizard-panel" class="hidden mt-3 p-4 bg-gradient-to-br from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-                                <div class="flex items-center justify-between mb-3">
-                                    <h4 class="text-sm font-semibold text-blue-800 dark:text-blue-200">Regex Pattern Generator</h4>
-                                    <button onclick="toggleRegexWizard()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
-                                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                <div class="ui-map-body">
+                    ${meta.supports_regex && canSave ? `
+                        <div>
+                            <button onclick="toggleRegexWizard()" id="regex-wizard-toggle" class="ui-btn ui-btn-sm">+ Regex Wizard</button>
+                            <div id="regex-wizard-panel" class="hidden ui-wizard">
+                                <div class="ui-list-head">
+                                    <h4 class="ui-md-h">Regex Pattern Generator</h4>
+                                    <button onclick="toggleRegexWizard()" class="ui-icon-btn ui-head-actions" title="Close" aria-label="Close">
+                                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                                     </button>
                                 </div>
-                                <div class="flex flex-col sm:flex-row gap-3">
-                                    <div class="flex-shrink-0">
-                                        <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Type</label>
-                                        <select id="regex-wizard-type" onchange="updateRegexWizardPreview()" class="w-full sm:w-40 px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
+                                <div class="ui-wizard-row">
+                                    <label class="ui-wizard-type"><span class="ui-label">Type</span>
+                                        <select id="regex-wizard-type" onchange="updateRegexWizardPreview()" class="ui-select">
                                             <option value="email">Exact Email</option>
                                             <option value="domain">Domain</option>
                                             <option value="tld">TLD</option>
                                             <option value="keyword">Keyword</option>
                                         </select>
-                                    </div>
-                                    <div class="flex-1">
-                                        <label id="regex-wizard-input-label" class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Email address</label>
-                                        <input type="text" id="regex-wizard-input" oninput="updateRegexWizardPreview()" placeholder="user@example.com" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg" />
-                                    </div>
-                                    <div class="flex-shrink-0 flex items-end">
-                                        <button onclick="regexWizardAdd()" id="regex-wizard-add-btn" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed" disabled>Add</button>
-                                    </div>
+                                    </label>
+                                    <label class="ui-wizard-value"><span id="regex-wizard-input-label" class="ui-label">Email address</span>
+                                        <input type="text" id="regex-wizard-input" oninput="updateRegexWizardPreview()" placeholder="user@example.com" class="ui-input" />
+                                    </label>
+                                    <button onclick="regexWizardAdd()" id="regex-wizard-add-btn" class="ui-btn ui-btn-primary" disabled>Add</button>
                                 </div>
-                                <div id="regex-wizard-preview" class="mt-3 hidden">
-                                    <label class="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-1">Generated pattern</label>
-                                    <div class="flex items-center gap-2">
-                                        <code id="regex-wizard-result" class="flex-1 px-3 py-2 text-sm font-mono bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-600 rounded-lg text-green-700 dark:text-green-400 break-all"></code>
-                                    </div>
-                                    <p id="regex-wizard-explain" class="mt-1 text-xs text-gray-500 dark:text-gray-400"></p>
+                                <div id="regex-wizard-preview" class="hidden">
+                                    <span class="ui-label">Generated pattern</span>
+                                    <code id="regex-wizard-result" class="ui-wizard-result"></code>
+                                    <p id="regex-wizard-explain" class="ui-muted"></p>
                                 </div>
                             </div>
                         </div>
                     ` : ''}
-                    <textarea id="map-editor-content" 
-                        class="w-full h-64 font-mono text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg p-4 focus:ring-blue-500 focus:border-blue-500"
-                        placeholder="Enter entries, one per line..."
+                    <textarea id="map-editor-content" class="ui-textarea ui-map-editor"${canSave ? '' : ' readonly aria-readonly="true"'}
+                        placeholder="${canSave ? 'Enter entries, one per line...' : 'This map is empty.'}"
                         oninput="onMapContentChange('${escapeJsArg(filename)}')">${escapeHtml(data.content || '')}</textarea>
-                    <div id="map-validation-errors" class="mt-2 hidden"></div>
-                    <div class="flex items-center justify-between mt-4">
-                        <p class="text-xs text-gray-400 dark:text-gray-500">
-                            Lines starting with # are comments. Empty lines are ignored.
-                        </p>
-                        <div class="flex items-center gap-2">
-                            <button onclick="validateMapContent('${escapeJsArg(filename)}')" class="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
-                                Validate
-                            </button>
-                            <button onclick="saveMapContent('${escapeJsArg(filename)}')" id="map-save-btn" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
-                                Save Changes
-                            </button>
-                        </div>
+                    <div id="map-validation-errors" class="hidden ui-map-errors"></div>
+                    <div id="map-conflict" class="hidden"></div>
+                    <div class="ui-map-foot">
+                        <p class="ui-muted">Lines starting with # are comments. Empty lines are ignored.</p>
+                        ${canSave ? `
+                        <div class="ui-row-actions">
+                            <button onclick="validateMapContent('${escapeJsArg(filename)}')" class="ui-btn">Validate</button>
+                        </div>` : ''}
                     </div>
+                    ${canSave ? uiSaveBar('map-savebar', { save: `saveMapContent('${escapeJsArg(filename)}')`, discard: `openMapEditor('${escapeJsArg(filename)}')` }) : ''}
+                    ${canSave || !mayEdit ? '' : uiLocked('Read-Only Mode', RSPAMD_MAPS_READONLY_TEXT)}
                 </div>
-            </div>
+            </section>
         `;
-        
+
     } catch (error) {
         console.error('Failed to load map content:', error);
         container.innerHTML = `
-            <div class="mb-4">
-                <button onclick="loadRspamdMaps()" class="inline-flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-800">
-                    ← Back to Maps List
-                </button>
-            </div>
-            <p class="text-red-500 text-center py-8">Failed to load map: ${escapeHtml(error.message)}</p>
+            ${rspamdMapCrumbs(filename)}
+            <p class="ui-empty ui-text-fail">Failed to load map: ${escapeHtml(uiErrorText(error))}</p>
         `;
     }
 }
 
+let mapEditorSaved = null;
+let mapEditorHash = null;
+let mapEditorOpened = 0;
+let mapEditorSaving = false;
+
+uiUnsavedRegister('rspamd-map', {
+    count: () => {
+        const textarea = document.getElementById('map-editor-content');
+        return textarea && textarea.getClientRects().length && mapEditorSaved !== null && textarea.value !== mapEditorSaved ? 1 : 0;
+    },
+    drop: () => { mapEditorSaved = null; },
+});
+
+async function rspamdLeaveMap() {
+    if (await uiConfirmLeave({ route: 'rspamd', reload: true })) loadRspamdMaps();
+}
+
 function onMapContentChange(filename) {
+    const textarea = document.getElementById('map-editor-content');
+    const changed = !!textarea && mapEditorSaved !== null && textarea.value !== mapEditorSaved;
     const statusEl = document.getElementById('map-validation-status');
-    if (statusEl) {
-        statusEl.innerHTML = '<span class="text-yellow-600 dark:text-yellow-400 text-xs">Modified</span>';
+    if (statusEl && changed) {
+        statusEl.innerHTML = uiTag('Modified', 'warn');
     }
+    uiSaveBarUpdate('map-savebar', changed ? 1 : 0);
 }
 
 async function validateMapContent(filename) {
     const content = document.getElementById('map-editor-content').value;
     const statusEl = document.getElementById('map-validation-status');
     const errorsEl = document.getElementById('map-validation-errors');
-    
+
     try {
         const response = await authenticatedFetch('/api/rspamd/validate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content, filename })
         });
-        
+        if (!response.ok) throw await responseError(response);
+
         const data = await response.json();
-        
-        document.getElementById('map-entry-count').textContent = `${data.entry_count} entries`;
-        
-        const warnings = data.warnings || [];
-        const warningHtml = warnings.map(w => `
-            <div class="text-xs text-amber-700 dark:text-amber-300 flex items-start gap-2 py-1">
-                <span class="font-mono text-gray-500 dark:text-gray-400 flex-shrink-0">Line ${w.line}:</span>
-                <span>${escapeHtml(w.error)} - <code class="bg-amber-50 dark:bg-amber-900/30 px-1 rounded">${escapeHtml(w.content)}</code></span>
+
+        document.getElementById('map-entry-count').textContent = uiCountLabel(data.entry_count, 'entry', 'entries');
+
+        const line = (entry, tone) => `
+            <div class="ui-map-error ui-text-${tone}">
+                <span class="ui-mono ui-muted">Line ${escapeHtml(String(entry.line))}:</span>
+                <span>${escapeHtml(entry.error)} - <code>${escapeHtml(entry.content)}</code></span>
             </div>
-        `).join('');
+        `;
+        const warnings = data.warnings || [];
+        const warningHtml = warnings.map(w => line(w, 'warn')).join('');
 
         if (data.valid) {
             statusEl.innerHTML = warnings.length
-                ? `<span class="text-amber-600 dark:text-amber-400 text-xs font-medium">✓ Valid, ${warnings.length} warning(s)</span>`
-                : '<span class="text-green-600 dark:text-green-400 text-xs font-medium">✓ Valid</span>';
+                ? uiTag(`Valid, ${warnings.length} warning(s)`, 'warn')
+                : uiTag('Valid', 'ok');
             errorsEl.classList.toggle('hidden', warnings.length === 0);
             errorsEl.innerHTML = warningHtml;
         } else {
-            statusEl.innerHTML = `<span class="text-red-600 dark:text-red-400 text-xs font-medium">✗ ${data.errors.length} error(s)</span>`;
+            statusEl.innerHTML = uiTag(`${data.errors.length} error(s)`, 'fail');
             errorsEl.classList.remove('hidden');
-            errorsEl.innerHTML = data.errors.map(e => `
-                <div class="text-xs text-red-600 dark:text-red-400 flex items-start gap-2 py-1">
-                    <span class="font-mono text-gray-500 dark:text-gray-400 flex-shrink-0">Line ${e.line}:</span>
-                    <span>${escapeHtml(e.error)} - <code class="bg-red-50 dark:bg-red-900/30 px-1 rounded">${escapeHtml(e.content)}</code></span>
-                </div>
-            `).join('') + warningHtml;
+            errorsEl.innerHTML = data.errors.map(e => line(e, 'fail')).join('') + warningHtml;
         }
     } catch (error) {
-        statusEl.innerHTML = '<span class="text-red-600 text-xs">Validation failed</span>';
+        statusEl.innerHTML = uiTag('Validation failed', 'fail');
+        showToast(`Could not check the map: ${uiErrorText(error)}`, 'error');
     }
 }
 
+function showMapConflict(filename, show) {
+    const el = document.getElementById('map-conflict');
+    if (!el) return;
+    el.classList.toggle('hidden', !show);
+    el.innerHTML = show ? `<div class="ui-banner ui-banner-warn" role="alert">
+            <div><b>The map changed since you opened it</b>
+                <p>Your edits were not saved. Reload shows the map as it is now and drops your edits, so copy them first if you need them.</p></div>
+            <button type="button" class="ui-btn ui-btn-sm" onclick="openMapEditor('${escapeJsArg(filename)}')">Reload</button>
+        </div>` : '';
+}
+
 async function saveMapContent(filename) {
+    if (mapEditorSaving) return;
+    mapEditorSaving = true;
+    try {
+        await saveMapContentOnce(filename);
+    } finally {
+        mapEditorSaving = false;
+    }
+}
+
+async function saveMapContentOnce(filename) {
+    if (!uiMayAct('rspamd')) return;
+    const opened = mapEditorOpened;
     const content = document.getElementById('map-editor-content').value;
-    const saveBtn = document.getElementById('map-save-btn');
-    
-    // Validate first
+    const baseHash = mapEditorHash;
+
     try {
         const valRes = await authenticatedFetch('/api/rspamd/validate', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ content, filename })
         });
+        if (!valRes.ok) throw await responseError(valRes);
         const valData = await valRes.json();
-        
+
         if (!valData.valid) {
             showToast(`Cannot save: ${valData.errors.length} validation error(s). Fix them first.`, 'error');
             validateMapContent(filename);
             return;
         }
     } catch (e) {
-        showToast('Validation failed: ' + e.message, 'error');
+        showToast('Validation failed: ' + uiErrorText(e), 'error');
         return;
     }
-    
-    // Save
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving...';
-    
+    if (opened !== mapEditorOpened) return;
+
+    uiSaveBarBusy('map-savebar', true);
+
     try {
-        const response = await authenticatedFetch(`/api/rspamd/maps/${filename}`, {
+        const response = await authenticatedFetch(`/api/rspamd/maps/${encodeURIComponent(filename)}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ content })
+            body: JSON.stringify({ content, base_hash: baseHash })
         });
-        
-        if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.detail?.message || err.detail || 'Save failed');
-        }
-        
-        const result = await response.json();
-        if (result.normalized_entries > 0) {
-            // Bare addresses were anchored server side - reflect the saved form
-            const textarea = document.getElementById('map-editor-content');
-            if (textarea && typeof result.content === 'string') textarea.value = result.content;
-            showToast(`Map saved (${result.entry_count} entries). ${result.normalized_entries} bare address entr${result.normalized_entries === 1 ? 'y was' : 'ies were'} anchored automatically.`, 'success');
-        } else {
-            showToast(`Map saved successfully (${result.entry_count} entries)`, 'success');
+        if (opened !== mapEditorOpened) {
+            if (response.ok) showToast('Map saved', 'success');
+            return;
         }
 
+        if (!response.ok) {
+            const err = await uiReadJson(response);
+            if (response.status === 409 && err?.detail?.code === 'map_changed') {
+                showMapConflict(filename, true);
+                return;
+            }
+            throw new Error(uiHttpErrorText(response.status, err));
+        }
+
+        const result = await response.json();
+        showMapConflict(filename, false);
+        const textarea = document.getElementById('map-editor-content');
+        const typedMeanwhile = !!textarea && textarea.value !== content;
+        const saved = typeof result.content === 'string' ? result.content : content;
+        const entries = uiCountLabel(result.entry_count, 'entry', 'entries');
+        if (!result.content_hash && !typedMeanwhile) {
+            showToast(`Map saved (${entries}). It is opened again to show it as saved.`, 'success');
+            mapEditorSaved = null;
+            openMapEditor(filename);
+            return;
+        }
+        mapEditorSaved = saved;
+        if (typedMeanwhile) {
+            mapEditorHash = '';
+        } else {
+            mapEditorHash = result.content_hash;
+            if (textarea) textarea.value = saved;
+        }
+        if (result.normalized_entries > 0) {
+            showToast(`Map saved (${entries}). ${result.normalized_entries} bare address entr${result.normalized_entries === 1 ? 'y was' : 'ies were'} anchored automatically.`, 'success');
+        } else {
+            showToast(`Map saved successfully (${entries})`, 'success');
+        }
         const statusEl = document.getElementById('map-validation-status');
-        if (statusEl) statusEl.innerHTML = '<span class="text-green-600 dark:text-green-400 text-xs font-medium">✓ Saved</span>';
-        document.getElementById('map-entry-count').textContent = `${result.entry_count} entries`;
+        if (statusEl) statusEl.innerHTML = uiTag('Saved', 'ok');
+        uiSaveBarUpdate('map-savebar', typedMeanwhile ? 1 : 0);
+        document.getElementById('map-entry-count').textContent = uiCountLabel(result.entry_count, 'entry', 'entries');
         
     } catch (error) {
-        showToast('Failed to save map: ' + error.message, 'error');
+        showToast('Failed to save map: ' + uiErrorText(error), 'error');
     } finally {
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'Save Changes';
+        uiSaveBarBusy('map-savebar', false);
     }
 }
 
-// =============================================================================
-// SUPPRESSIONS
-// =============================================================================
+function suppressionSyncLocked() {
+    return typeof mailcowRwConfigured !== 'undefined' && !mailcowRwConfigured;
+}
+
+function updateSuppressionSyncLock() {
+    const locked = suppressionSyncLocked() && !(suppressionRspamdState && !suppressionRspamdState.sync_on) && userCan('outbound', 'write');
+    const note = document.getElementById('suppression-rw-note');
+    if (note) {
+        note.innerHTML = locked ? `<div class="ui-list-note ui-flush">${uiLocked('Syncing to Rspamd is locked',
+            `Suppressions are kept here, but sending them to Rspamd so it rejects the mail ${UI_RW_KEY_TEXT}`)}</div>` : '';
+    }
+}
+
+let suppressionRspamdState = null;
+
+async function suppressionFailure(response, what) {
+    return new Error(`${what}: ${uiHttpErrorText(response.status, await uiReadJson(response))}`);
+}
+
+let suppressionStateSeq = 0;
+
+function suppressionShowOff(off) {
+    const offNote = document.getElementById('suppression-off-note');
+    ['suppression-stats', 'suppression-list-card'].forEach(id => document.getElementById(id)?.classList.toggle('hidden', off));
+    if (!offNote) return;
+    offNote.classList.toggle('hidden', !off);
+    offNote.innerHTML = off ? `<div class="ui-list-note ui-flush">${uiLocked('No suppression list',
+        "Sync with Rspamd is off. Turn it on in Settings to load and manage this app's blocks.",
+        `<button data-acts="admin" type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'outbound' })">Settings</button>`)}</div>` : '';
+}
+
+async function loadSuppressionSyncNote() {
+    const note = document.getElementById('suppression-sync-note');
+    if (!note) return;
+    const seq = ++suppressionStateSeq;
+    let state;
+    try {
+        const res = await authenticatedFetch('/api/suppressions/rspamd/state');
+        if (!res.ok) throw new Error();
+        state = await res.json();
+    } catch (e) {
+        if (seq === suppressionStateSeq) note.innerHTML = '';
+        return;
+    }
+    if (seq !== suppressionStateSeq) return;
+    const wasOn = suppressionRspamdState ? suppressionRspamdState.sync_on : null;
+    suppressionRspamdState = state;
+    updateSuppressionSyncLock();
+    suppressionShowOff(!state.sync_on);
+    if (state.sync_on && wasOn === false) loadSuppressions();
+    const settingsButton = `<button data-acts="admin" type="button" class="ui-btn ui-btn-sm" onclick="navigateTo('settings', { sub: 'outbound' })">Settings</button>`;
+    if (!state.sync_on) {
+        note.innerHTML = '';
+        return;
+    }
+    if (state.reason === 'section_unclear') {
+        note.innerHTML = `<div class="ui-list-note ui-flush">${uiLocked("This app's Rspamd section needs fixing", escapeHtml(state.reason_text))}</div>`;
+        return;
+    }
+    note.innerHTML = state.reason === 'no_password' || state.reason === 'no_rw_key_and_password'
+        ? `<div class="ui-list-note ui-flush">${uiLocked('Rspamd cannot be reached', 'Sync with Rspamd is on, but the Rspamd password is not set. Changes here stay in this app until it is.', settingsButton)}</div>`
+        : '';
+}
+
+let suppressionSort = { by: 'created_at', dir: 'desc' };
+function suppressionSortAttr(key) {
+    return ` aria-sort="${suppressionSort.by === key ? (suppressionSort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}"`;
+}
+function suppressionSortBy(key, dir) {
+    suppressionSort = { by: key, dir };
+    loadSuppressions(1);
+}
+
+const SUPPRESSION_PER_PAGE = 50;
+let suppressionTotalPages = 1;
+let suppressionSeq = 0;
+let suppressionListLoading = false;
+let suppressionLoadingMore = false;
+let suppressionMoreObserver = null;
+let suppressionQuery = null;
+
+function suppressionQueryNow() {
+    return {
+        search: document.getElementById('suppression-search')?.value || '',
+        reason: document.getElementById('suppression-filter-reason')?.value || '',
+        active: document.getElementById('suppression-filter-active')?.value || '',
+        sortBy: suppressionSort.by,
+        sortDir: suppressionSort.dir,
+    };
+}
+
+function fetchSuppressionPage(page, query) {
+    const params = new URLSearchParams({
+        page,
+        per_page: SUPPRESSION_PER_PAGE,
+    });
+    if (query.search) params.append('search', query.search);
+    if (query.reason) params.append('reason_filter', query.reason);
+    if (query.active) params.append('active_filter', query.active);
+    params.append('sort_by', query.sortBy);
+    params.append('sort_dir', query.sortDir);
+
+    return authenticatedFetch(`/api/suppressions?${params}`).then(async response => {
+        if (!response.ok) throw await responseError(response);
+        return response.json();
+    });
+}
 
 async function loadSuppressions(page) {
-    suppressionPage = page || suppressionPage || 1;
+    uiFilterBarSync();
+    const seq = ++suppressionSeq;
+    suppressionWatchMore(false);
+    suppressionLoadingMore = false;
+    suppressionListLoading = true;
+    if (page || !suppressionQuery) {
+        suppressionQuery = suppressionQueryNow();
+        suppressionPage = 1;
+    }
+    const query = suppressionQuery;
+    const pages = Math.max(1, suppressionPage || 1);
     const container = document.getElementById('suppression-list');
-    
-    const search = document.getElementById('suppression-search')?.value || '';
-    const reason = document.getElementById('suppression-filter-reason')?.value || '';
-    const active = document.getElementById('suppression-filter-active')?.value || '';
-    
-    const params = new URLSearchParams({
-        page: suppressionPage,
-        per_page: 50,
-    });
-    if (search) params.append('search', search);
-    if (reason) params.append('reason_filter', reason);
-    if (active) params.append('active_filter', active);
-    
+    if (typeof mailcowRwConfigured !== 'undefined' && !mailcowRwConfigured) await fetchRwStatus();
+    updateSuppressionSyncLock();
+    loadSuppressionSyncNote();
+    if (suppressionRspamdState && !suppressionRspamdState.sync_on) {
+        suppressionListLoading = false;
+        return;
+    }
+
     try {
-        const response = await authenticatedFetch(`/api/suppressions?${params}`);
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        
-        const data = await response.json();
-        
-        if (!data.items || data.items.length === 0) {
+        const results = await Promise.all(Array.from({ length: pages }, (_, i) => fetchSuppressionPage(i + 1, query)));
+        if (seq !== suppressionSeq) return;
+        suppressionListLoading = false;
+        const data = results[0];
+        const countEl = document.getElementById('suppression-count');
+        if (countEl) countEl.textContent = uiCountLabel(data.total || 0, 'suppression', 'suppressions');
+
+        suppressionItemsById.clear();
+        const items = [];
+        results.forEach(r => (r.items || []).forEach(s => {
+            if (suppressionItemsById.has(s.id)) return;
+            suppressionItemsById.set(s.id, s);
+            items.push(s);
+        }));
+        suppressionTotalPages = data.total_pages || 1;
+        suppressionPage = Math.min(pages, suppressionTotalPages);
+
+        if (items.length === 0) {
             container.innerHTML = `
-                <div class="text-center py-12">
-                    <svg class="w-16 h-16 mx-auto mb-4 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"></path>
-                    </svg>
-                    <h3 class="text-lg font-medium text-gray-500 dark:text-gray-400 mb-1">No Suppressions</h3>
-                    <p class="text-sm text-gray-400 dark:text-gray-500">Suppressed addresses will appear here when detected or added manually.</p>
+                <div class="ui-empty ui-panel">
+                    <p><b>No Suppressions</b></p>
+                    <p>Suppressed addresses will appear here when detected or added manually.</p>
                 </div>
             `;
             return;
         }
-        
-        suppressionItemsById.clear();
-        data.items.forEach(s => suppressionItemsById.set(s.id, s));
+
         container.innerHTML = `
-            <div class="space-y-2">
-                ${data.items.map(s => renderSuppressionItem(s)).join('')}
+            <div class="ui-table ui-stack ui-supp-table" data-sort-handler="suppressionSortBy" data-sort-at="suppression-search" data-sort-name="suppressions" data-sort-default="Added:desc">
+                <div class="ui-tr ui-tr-head"><span data-sort-key="email" data-sort-kind="text"${suppressionSortAttr('email')}>Address</span><span data-sort-key="reason" data-sort-kind="text"${suppressionSortAttr('reason')}>Reason</span><span data-sort-key="bounce_count" data-sort-kind="number"${suppressionSortAttr('bounce_count')}>Bounces</span><span data-sort-key="expires_at" data-sort-kind="date"${suppressionSortAttr('expires_at')}>Expiry</span><span>Rspamd</span><span data-sort-key="created_at" data-sort-kind="date"${suppressionSortAttr('created_at')}>Added</span><span class="ui-td-end">Actions</span></div>
+                ${items.map(s => renderSuppressionItem(s)).join('')}
             </div>
-            ${data.total_pages > 1 ? renderSuppressionPagination(data.page, data.total_pages, data.total) : ''}
+            <p id="suppression-more" class="ui-msg-more" aria-live="polite"></p>
         `;
-        
+        suppressionShowMore();
+
     } catch (error) {
+        if (seq !== suppressionSeq) return;
+        suppressionListLoading = false;
         console.error('Failed to load suppressions:', error);
-        container.innerHTML = `<p class="text-red-500 text-center py-8">Failed to load: ${escapeHtml(error.message)}</p>`;
+        container.innerHTML = `<p class="ui-empty ui-text-fail">Failed to load: ${escapeHtml(uiErrorText(error))}</p>`;
     }
+}
+
+async function loadMoreSuppressions() {
+    if (suppressionListLoading || suppressionLoadingMore || suppressionPage >= suppressionTotalPages) return;
+    const seq = suppressionSeq;
+    const next = suppressionPage + 1;
+    const more = document.getElementById('suppression-more');
+    suppressionLoadingMore = true;
+    if (more) more.textContent = 'Loading more...';
+    try {
+        const data = await fetchSuppressionPage(next, suppressionQuery);
+        if (seq !== suppressionSeq) return;
+        const fresh = (data.items || []).filter(s => !suppressionItemsById.has(s.id));
+        fresh.forEach(s => suppressionItemsById.set(s.id, s));
+        document.querySelector('#suppression-list .ui-supp-table')?.insertAdjacentHTML('beforeend', fresh.map(s => renderSuppressionItem(s)).join(''));
+        suppressionPage = next;
+        suppressionTotalPages = data.total_pages || suppressionTotalPages;
+        const countEl = document.getElementById('suppression-count');
+        if (countEl) countEl.textContent = uiCountLabel(data.total || 0, 'suppression', 'suppressions');
+        suppressionLoadingMore = false;
+        suppressionShowMore();
+    } catch (error) {
+        if (seq !== suppressionSeq) return;
+        suppressionLoadingMore = false;
+        if (more) more.innerHTML = 'Could not load more suppressions. <button type="button" class="ui-link-row ui-link" onclick="loadMoreSuppressions()">Try again</button>';
+    }
+}
+
+function suppressionShowMore() {
+    const more = document.getElementById('suppression-more');
+    const left = suppressionPage < suppressionTotalPages;
+    if (more) more.textContent = left ? 'Loading more...'
+        : suppressionTotalPages > 1 ? `All ${uiCountLabel(suppressionItemsById.size, 'suppression', 'suppressions')} shown` : '';
+    suppressionWatchMore(left);
+}
+
+function suppressionWatchMore(left) {
+    if (suppressionMoreObserver) suppressionMoreObserver.disconnect();
+    suppressionMoreObserver = null;
+    const sentinel = document.getElementById('suppression-more');
+    if (!left || !sentinel || typeof IntersectionObserver === 'undefined') return;
+    suppressionMoreObserver = new IntersectionObserver(entries => {
+        if (!entries.some(e => e.isIntersecting)) return;
+        suppressionMoreObserver.disconnect();
+        loadMoreSuppressions();
+    }, { rootMargin: '0px 0px 400px 0px' });
+    suppressionMoreObserver.observe(sentinel);
 }
 
 function renderSuppressionItem(s) {
-    const reasonColors = {
-        hard_bounce: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300',
-        soft_bounce: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300',
-        deferred_stuck: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
-        rejected: 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300',
-        manual: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300',
-    };
-    
-    const sourceColors = {
-        auto: 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
-        manual: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300',
-        import: 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300',
-    };
-    
-    // Fix #5: Show proper sync status based on active state
-    let syncBadge = '';
+    const REASON_TONE = { hard_bounce: 'fail', soft_bounce: 'warn', deferred_stuck: 'warn', rejected: 'warn', manual: '' };
+    const SOURCE_TONE = { auto: 'info', manual: '', import: 'spam', rspamd: 'spam' };
+
+    let syncBadge = '<span class="ui-muted">-</span>';
     if (s.active) {
-        if (s.synced_to_rspamd) {
-            syncBadge = '<span class="text-green-500 text-xs" title="Synced to Rspamd">✓ Synced</span>';
-        } else {
-            syncBadge = '<span class="text-yellow-500 text-xs" title="Pending sync to Rspamd">⟳ Pending</span>';
-        }
-    } else {
-        // Inactive entries: show "Removed" if was synced, nothing if never synced
-        if (s.synced_to_rspamd) {
-            syncBadge = '<span class="text-gray-400 text-xs" title="Will be removed from Rspamd on next sync">⊘ Will unsync</span>';
-        }
+        syncBadge = s.synced_to_rspamd
+            ? '<span class="ui-text-ok" title="Synced to Rspamd">Synced</span>'
+            : `<span class="ui-text-warn" title="${suppressionSyncLocked() ? 'Not synced: syncing to Rspamd needs the Read-Write API key' : 'Waiting to be written to Rspamd'}">⟳ Pending</span>`;
+    } else if (!s.synced_to_rspamd) {
+        syncBadge = '<span class="ui-text-warn" title="Waiting to be removed from Rspamd">⟳ Pending</span>';
     }
-    
-    // For domain regex entries like /.+@example\.com/i, show clean domain
+
     const displayEmail = _cleanRegexDomain(s.email);
     const isRegexDomain = displayEmail !== s.email;
-    
-    return `
-        <div class="border border-gray-200 dark:border-gray-700 rounded-lg p-4 ${!s.active ? 'opacity-60' : ''} hover:bg-gray-50 dark:hover:bg-gray-700/50 transition">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div class="flex-1 min-w-0">
-                    <div class="flex flex-wrap items-center gap-2 mb-1">
-                        <span class="font-medium text-gray-900 dark:text-white">${copyableText(displayEmail)}</span>
-                        ${isRegexDomain ? '<span class="px-2 py-0.5 text-xs bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded" title="' + escapeHtml(s.email) + '">Domain</span>' : ''}
-                        <span class="px-2 py-0.5 text-xs font-medium rounded ${reasonColors[s.reason] || reasonColors.manual}">${s.reason.replace('_', ' ')}</span>
-                        <span class="px-2 py-0.5 text-xs font-medium rounded ${sourceColors[s.source] || sourceColors.manual}">${s.source || 'manual'}</span>
-                        ${!s.active ? '<span class="px-2 py-0.5 text-xs font-medium rounded bg-gray-200 dark:bg-gray-600 text-gray-600 dark:text-gray-400">Inactive</span>' : ''}
-                        ${s.is_expired ? '<span class="px-2 py-0.5 text-xs font-medium rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300">Expired</span>' : ''}
-                        ${syncBadge}
-                    </div>
-                    <div class="flex flex-wrap gap-3 text-xs text-gray-500 dark:text-gray-400">
-                        ${s.bounce_count > 0 ? `<span>Bounces: ${s.bounce_count} (H:${s.hard_bounce_count} S:${s.soft_bounce_count})</span>` : ''}
-                        ${!s.expires_at && s.active ? '<span class="text-purple-600 dark:text-purple-400 font-medium">∞ Permanent</span>' : ''}
-                        ${s.expires_in ? `<span>Expires in ${s.expires_in.human}</span>` : ''}
-                        ${s.notes ? `<span title="${escapeHtml(s.notes)}">📝 ${escapeHtml(s.notes.substring(0, 40))}${s.notes.length > 40 ? '...' : ''}</span>` : ''}
-                        <span>${formatTime(s.created_at)}</span>
-                    </div>
-                </div>
-                <div class="flex items-center gap-1 flex-shrink-0">
-                    <button onclick="showEditSuppressionModalById(${Number(s.id)})" class="px-2 py-1 text-xs rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200" title="Edit suppression">
-                        Edit
-                    </button>
-                    <button onclick="toggleSuppression(${s.id}, ${!s.active})" class="px-2 py-1 text-xs rounded ${s.active ? 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-200' : 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 hover:bg-green-200'}" title="${s.active ? 'Deactivate' : 'Reactivate'}">
-                        ${s.active ? 'Disable' : 'Enable'}
-                    </button>
-                    <button onclick="deleteSuppression(${s.id}, '${escapeJsArg(s.email)}')" class="px-2 py-1 text-xs rounded bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 hover:bg-red-200" title="Delete permanently">
-                        Delete
-                    </button>
-                </div>
-            </div>
-        </div>
-    `;
-}
+    const expiry = s.expires_in ? `Expires in ${escapeHtml(s.expires_in.human)}`
+        : (!s.expires_at && s.active ? '<span class="ui-text-spam">∞ Permanent</span>' : '-');
 
-function renderSuppressionPagination(page, totalPages, total) {
     return `
-        <div class="flex items-center justify-between mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-            <span class="text-sm text-gray-500 dark:text-gray-400">${total} total</span>
-            <div class="flex items-center gap-1">
-                ${page > 1 ? `<button onclick="loadSuppressions(${page - 1})" class="px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">← Prev</button>` : ''}
-                <span class="px-3 py-1 text-sm text-gray-500 dark:text-gray-400">Page ${page}/${totalPages}</span>
-                ${page < totalPages ? `<button onclick="loadSuppressions(${page + 1})" class="px-3 py-1 text-sm rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Next →</button>` : ''}
+        <div class="ui-tr${!s.active ? ' ui-row-off' : ''}">
+            <div class="ui-td ui-q-who">
+                <div>${uiEntity(isRegexDomain ? 'domain' : 'address', displayEmail)}
+                    ${isRegexDomain ? `<span class="ui-tag ui-tag-info" title="${escapeHtml(s.email)}">Domain</span>` : ''}
+                    ${!s.active ? uiTag('Inactive', '') : ''}
+                    ${s.is_expired ? uiTag('Expired', 'fail') : ''}</div>
+                ${s.notes ? `<small title="${escapeHtml(s.notes)}">${escapeHtml(s.notes)}</small>` : ''}
             </div>
+            <span class="ui-td ui-td-wrap">${uiTag(s.reason.replace('_', ' '), REASON_TONE[s.reason] || '')} ${suppressionSourceTag(s.source, SOURCE_TONE)}</span>
+            <span class="ui-td"><small class="ui-sec-unit">Bounces </small>${s.bounce_count > 0 ? `${escapeHtml(String(s.bounce_count))} <small class="ui-muted">(H:${escapeHtml(String(s.hard_bounce_count))} S:${escapeHtml(String(s.soft_bounce_count))})</small>` : '<span class="ui-muted">-</span>'}</span>
+            <span class="ui-td">${expiry}</span>
+            <span class="ui-td">${syncBadge}</span>
+            <span class="ui-td"><small class="ui-sec-unit">Added </small>${uiTime(s.created_at, formatAgo(s.created_at), { title: formatTime(s.created_at) })}</span>
+            <span class="ui-td ui-td-end ui-row-actions">
+                <button onclick="showBlockDetails(${Number(s.id)})" class="ui-btn ui-btn-sm">Block details</button>
+                <button onclick="showEditSuppressionModalById(${Number(s.id)})" class="ui-btn ui-btn-sm" title="Edit suppression" data-acts="outbound">Edit</button>
+                <button onclick="toggleSuppressionOnce(${Number(s.id)}, ${!s.active}, this)" class="ui-btn ui-btn-sm" data-acts="outbound" title="${s.active ? 'Deactivate' : 'Reactivate'}">${s.active ? 'Disable' : 'Enable'}</button>
+                <button onclick="deleteSuppression(${Number(s.id)}, '${escapeJsArg(s.email)}')" class="ui-btn ui-btn-sm ui-btn-danger" title="Delete permanently" data-acts="outbound">Delete</button>
+            </span>
         </div>
     `;
 }
@@ -557,113 +678,172 @@ function renderSuppressionPagination(page, totalPages, total) {
 async function loadSuppressionStats() {
     const container = document.getElementById('suppression-stats');
     if (!container) return;
-    
+
     try {
         const response = await authenticatedFetch('/api/suppressions/stats');
         if (!response.ok) return;
-        
+
         const stats = await response.json();
-        
+        const summary = document.getElementById('suppression-summary');
+        if (summary) {
+            const n = Number(stats.active) || 0;
+            summary.textContent = n ? `${n.toLocaleString()} ${n === 1 ? 'recipient' : 'recipients'} blocked.` : 'No recipients blocked.';
+        }
+
         container.innerHTML = `
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4">
-                <div class="text-2xl font-bold text-gray-900 dark:text-white">${stats.active}</div>
-                <div class="text-xs text-gray-500 dark:text-gray-400">Active</div>
-            </div>
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4">
-                <div class="text-2xl font-bold text-red-600 dark:text-red-400">${stats.hard_bounce}</div>
-                <div class="text-xs text-gray-500 dark:text-gray-400">Hard Bounces</div>
-            </div>
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4">
-                <div class="text-2xl font-bold text-yellow-600 dark:text-yellow-400">${stats.soft_bounce}</div>
-                <div class="text-xs text-gray-500 dark:text-gray-400">Soft Bounces</div>
-            </div>
-            <div class="bg-white dark:bg-gray-800 rounded-lg shadow dark:shadow-gray-900/30 p-4">
-                <div class="text-2xl font-bold text-blue-600 dark:text-blue-400">${stats.pending_sync}</div>
-                <div class="text-xs text-gray-500 dark:text-gray-400">Pending Sync</div>
-            </div>
+            <div class="ui-kpi"><b>${escapeHtml(String(stats.active))}</b>Active</div>
+            <div class="ui-kpi"><b class="${stats.hard_bounce ? 'ui-fail' : ''}">${escapeHtml(String(stats.hard_bounce))}</b>Hard Bounces</div>
+            <div class="ui-kpi"><b class="${stats.soft_bounce ? 'ui-warn' : ''}">${escapeHtml(String(stats.soft_bounce))}</b>Soft Bounces</div>
+            <div class="ui-kpi"><b>${escapeHtml(String(stats.pending_sync))}</b>Pending Sync</div>
         `;
     } catch (error) {
         console.error('Failed to load suppression stats:', error);
     }
 }
 
-// =============================================================================
-// SUPPRESSION CRUD
-// =============================================================================
+const BLOCK_EVENT_TITLES = {
+    hard_bounce: 'Delivery failed', soft_bounce: 'Delivery delayed', rejected: 'Delivery rejected',
+    deferred_stuck: 'Stuck in queue', added: 'Added manually', imported: 'Imported from CSV',
+    enabled: 'Enabled manually', disabled: 'Disabled manually', expiry_changed: 'Expiry changed',
+    notes_changed: 'Notes changed', before_upgrade: 'Last saved reason', loaded_from_rspamd: 'Loaded from Rspamd',
+    added_in_rspamd: 'Added in Rspamd'
+};
 
-function showAddSuppressionModal(prefillEmail) {
-    const modal = document.createElement('div');
-    modal.id = 'add-suppression-modal';
-    modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
-    
-    modal.innerHTML = `
-        <div class="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-6" onclick="event.stopPropagation()">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-4">Add Suppression</h3>
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Type</label>
-                    <select id="new-suppression-type" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                        onchange="updateSuppressionInputPlaceholder()">
-                        <option value="email">Email Address</option>
-                        <option value="domain">Domain</option>
-                    </select>
-                </div>
-                <div>
-                    <label id="new-suppression-label" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email Address</label>
-                    <input type="text" id="new-suppression-email" 
-                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                        placeholder="user@example.com">
-                    <p id="new-suppression-hint" class="text-xs text-gray-400 dark:text-gray-500 mt-1 hidden"></p>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Reason</label>
-                    <select id="new-suppression-reason" class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                        <option value="manual">Manual</option>
-                        <option value="hard_bounce">Hard Bounce</option>
-                        <option value="soft_bounce">Soft Bounce</option>
-                        <option value="deferred_stuck">Deferred Stuck</option>
-                        <option value="rejected">Rejected</option>
-                    </select>
-                </div>
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes (optional)</label>
-                    <input type="text" id="new-suppression-notes" 
-                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                        placeholder="Reason for suppression...">
-                </div>
-                <div>
-                    <label class="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" id="new-suppression-permanent" checked
-                            class="rounded border-gray-300 dark:border-gray-600"
-                            onchange="toggleCreateExpiryField()">
-                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Permanent block</span>
-                    </label>
-                    <div id="new-suppression-expiry-row" class="mt-2 hidden">
-                        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Expires after (days)</label>
-                        <input type="number" id="new-suppression-expiry-days" min="1" max="365" value="7"
-                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                    </div>
-                </div>
-            </div>
-            <div class="flex justify-end gap-2 mt-6">
-                <button onclick="document.getElementById('add-suppression-modal').remove()" class="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
-                    Cancel
-                </button>
-                <button onclick="createSuppression()" class="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg">
-                    Add Suppression
-                </button>
-            </div>
+const SUPPRESSION_SOURCE_LABELS = { rspamd: 'From Rspamd' };
+const SUPPRESSION_SOURCE_TIPS = { rspamd: "Added in mailcow to this app's Rspamd section, or loaded back from it. Permanent. Automatic processing does not change this entry; you can edit or delete it." };
+
+function suppressionSourceTag(source, tones) {
+    const tag = uiTag(SUPPRESSION_SOURCE_LABELS[source] || source || 'manual', tones[source] || '');
+    const tip = SUPPRESSION_SOURCE_TIPS[source];
+    return tip ? tag.replace('<span class="ui-tag', `<span title="${escapeHtml(tip)}" class="ui-tag`) : tag;
+}
+const BLOCK_OUTCOMES = { created: ['Blocked', 'fail'], activated: ['Blocked again', 'fail'], extended: ['Block extended', 'warn'],
+    counted: ['Counted, not blocked yet', ''], kept: ['Counted, block unchanged', ''] };
+let blockDetailsState = null;
+
+function blockEventHtml(e) {
+    const field = (label, value, mono) => value ? `<dt>${label}</dt><dd${mono ? ' class="ui-mono"' : ''}>${escapeHtml(String(value))}</dd>` : '';
+    const entityField = (label, value) => value ? `<dt>${label}</dt><dd>${uiEntity('address', String(value), { plain: true })}</dd>` : '';
+    const outcome = BLOCK_OUTCOMES[e.outcome];
+    const message = e.correlation_key
+        ? (e.message_available
+            ? `<button type="button" class="ui-btn ui-btn-sm" onclick="viewMessageDetails('${escapeJsArg(e.correlation_key)}')">Open message</button>`
+            : '<small class="ui-muted">No longer in Messages</small>')
+        : (['added', 'imported'].includes(e.kind) && !e.queue_id ? '<small class="ui-muted">No message was linked to this entry.</small>' : '');
+    const ids = field('Queue ID', e.queue_id, true) + field('Message-ID', e.message_id, true);
+    const lines = (e.log_lines || []).map(l => `${escapeHtml(formatTime(l.time))}  ${escapeHtml(l.program || '')}: ${escapeHtml(l.message || '')}`).join('\n');
+    const bounce = ['hard_bounce', 'soft_bounce', 'rejected', 'deferred_stuck'].includes(e.kind);
+    const logs = bounce || e.queue_id
+        ? `<details class="ui-block-logs"><summary>Saved logs</summary>
+            ${ids ? `<dl class="ui-block-fields">${ids}</dl>` : ''}
+            ${lines ? `<pre class="ui-block-pre">${lines}</pre>` : '<p class="ui-muted">No logs saved for this event.</p>'}
+            ${e.logs_shortened ? '<p class="ui-muted">Some log details were shortened.</p>' : ''}
+          </details>` : '';
+    return `<article class="ui-block-event">
+        <header><b>${BLOCK_EVENT_TITLES[e.kind] || escapeHtml(e.kind)}</b>${outcome ? ' ' + uiTag(outcome[0], outcome[1]) : ''}
+            <small class="ui-muted" title="Recorded">${escapeHtml(formatTime(e.recorded_at))}</small></header>
+        <dl class="ui-block-fields">
+            ${field('Message time', e.message_time ? formatTime(e.message_time) : null)}
+            ${field('Reason', e.kind === 'before_upgrade' || !bounce ? e.reason : null)}
+            ${field('Server reply', e.server_reply)}
+            ${entityField('From', e.sender)}${entityField('To', bounce ? e.recipient : null)}${field('Subject', e.subject)}
+            ${field('Notes', e.notes)}
+            ${['added', 'enabled', 'expiry_changed'].includes(e.kind) ? field('Expires', e.expires_at ? formatTime(e.expires_at) : 'Never') : ''}
+        </dl>
+        ${e.kind === 'before_upgrade' ? '<p class="ui-muted">Older details were not saved.</p>' : ''}
+        ${message}${logs}
+    </article>`;
+}
+
+async function showBlockDetails(id, more) {
+    const existing = document.getElementById('block-details-modal');
+    if (!more) {
+        if (existing) existing.remove();
+        blockDetailsState = { id, page: 0, events: [], total: 0, email: '' };
+        const closeDetails = () => document.getElementById('block-details-modal')?.remove();
+        suppressionDialog('block-details-modal', 'Block details', '<div id="block-details-body"><div class="ui-loading" role="status"><div class="loading"></div></div></div>',
+            '<button type="button" class="ui-btn" onclick="document.getElementById(\'block-details-modal\').remove()">Close</button>',
+            { size: 'md', close: closeDetails, backdropClose: closeDetails });
+    }
+    const body = document.getElementById('block-details-body');
+    if (!body) return;
+    const state = blockDetailsState;
+    if (state.loading) return;
+    state.loading = true;
+    try {
+        const res = await authenticatedFetch(`/api/suppressions/${Number(id)}/events?page=${state.page + 1}`);
+        if (!res.ok) throw await responseError(res);
+        const data = await res.json();
+        state.page += 1;
+        state.events = state.events.concat(data.events);
+        state.total = data.total;
+        state.email = _cleanRegexDomain(data.suppression.email);
+    } catch (e) {
+        body.innerHTML = `<p class="ui-text-fail">Could not load block details: ${escapeHtml(uiErrorText(e))}</p>`;
+        return;
+    } finally {
+        state.loading = false;
+    }
+    const older = state.events.length < state.total
+        ? `<button type="button" class="ui-btn ui-btn-sm" onclick="showBlockDetails(${Number(id)}, true)">Show older</button>` : '';
+    body.innerHTML = `<p class="ui-block-who">${escapeHtml(state.email)}</p>`
+        + (state.events.length ? state.events.map(blockEventHtml).join('') : '<p class="ui-muted">No block details saved.</p>')
+        + older;
+}
+
+function suppressionDialog(id, title, body, actions, { size = 'sm', close = () => uiCancelDialog(id), backdropClose = null } = {}) {
+    return uiDialog({ id, title, size, close, backdropClose, bodyClass: 'ui-form', body, foot: actions }).backdrop;
+}
+
+let suppressionFromQueue = null;
+let suppressionAfterAdd = null;
+
+function showAddSuppressionModal(prefillEmail, queueId, { notes = 'Added from queue page', onAdded = null } = {}) {
+    suppressionFromQueue = queueId && prefillEmail ? { email: String(prefillEmail).toLowerCase(), queueId } : null;
+    suppressionAfterAdd = typeof onAdded === 'function' ? onAdded : null;
+    suppressionDialog('add-suppression-modal', 'Add Suppression', `
+        <label><span class="ui-label">Type</span>
+            <select id="new-suppression-type" class="ui-select" onchange="updateSuppressionInputPlaceholder()">
+                <option value="email">Email Address</option>
+                <option value="domain">Domain</option>
+            </select>
+        </label>
+        <label><span class="ui-label"><span id="new-suppression-label">Email Address</span> <span class="ui-text-fail">*</span></span>
+            <input type="text" id="new-suppression-email" class="ui-input" placeholder="user@example.com">
+            <small id="new-suppression-hint" class="ui-muted hidden"></small>
+        </label>
+        <label><span class="ui-label">Reason</span>
+            <select id="new-suppression-reason" class="ui-select">
+                <option value="manual">Manual</option>
+                <option value="hard_bounce">Hard Bounce</option>
+                <option value="soft_bounce">Soft Bounce</option>
+                <option value="deferred_stuck">Deferred Stuck</option>
+                <option value="rejected">Rejected</option>
+            </select>
+        </label>
+        <label><span class="ui-label">Notes (optional)</span>
+            <input type="text" id="new-suppression-notes" class="ui-input" placeholder="Reason for suppression...">
+        </label>
+        <div>
+            <label class="ui-check-label">
+                <input type="checkbox" id="new-suppression-permanent" class="ui-check" checked onchange="toggleCreateExpiryField()">
+                Permanent block
+            </label>
+            <label id="new-suppression-expiry-row" class="hidden ui-form-sub"><span class="ui-label">Expires after (days)</span>
+                <input type="number" id="new-suppression-expiry-days" min="1" max="365" value="7" class="ui-input">
+            </label>
         </div>
-    `;
-    
-    document.body.appendChild(modal);
-    
-    // Pre-fill email if provided (e.g., from queue page)
+    `, `
+        <button onclick="uiCancelDialog('add-suppression-modal')" class="ui-btn">Cancel</button>
+        <button data-acts="outbound" onclick="createSuppressionOnce(this)" class="ui-btn ui-btn-primary">Add Suppression</button>
+    `);
+
     if (prefillEmail) {
         document.getElementById('new-suppression-email').value = prefillEmail;
-        document.getElementById('new-suppression-notes').value = 'Added from queue page';
+        document.getElementById('new-suppression-notes').value = notes || '';
     }
-    
+
+    uiGuardDialog(document.getElementById('add-suppression-modal'));
     document.getElementById('new-suppression-email').focus();
 }
 
@@ -699,29 +879,38 @@ function toggleCreateExpiryField() {
     }
 }
 
+function createSuppressionOnce(button) {
+    return uiOnce(button || 'suppression-add', createSuppression, button, 'Adding...');
+}
+function suppressionDomainInput(value) {
+    return String(value).trim().toLowerCase().replace(/^@/, '').replace(/\.$/, '');
+}
+
 async function createSuppression() {
-    let email = document.getElementById('new-suppression-email').value.trim();
+    if (!uiMayAct('outbound')) return;
+    const field = document.getElementById('new-suppression-email');
+    let email = field.value.trim();
     const type = document.getElementById('new-suppression-type').value;
     const reason = document.getElementById('new-suppression-reason').value;
     const notes = document.getElementById('new-suppression-notes').value.trim();
-    
+
     if (!email) {
-        showToast(type === 'domain' ? 'Domain name is required' : 'Email address is required', 'error');
+        uiFieldProblem(field, type === 'domain' ? 'Enter a domain name.' : 'Enter an email address.');
         return;
     }
-    
-    // Fix #5: Convert domain to regex pattern
+
     if (type === 'domain') {
-        // If user entered a raw domain, convert to regex
         if (!email.startsWith('/')) {
-            // Only a plain hostname can be turned into a pattern safely. Escaping
-            // just the dots left every other metacharacter (and the / delimiter)
-            // free to change the regex that ends up in the Rspamd map.
-            if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(email)) {
-                showToast('Enter a plain domain name, for example example.com', 'error');
+            const domain = suppressionDomainInput(email);
+            if (domain.startsWith('*.')) {
+                uiFieldProblem(field, 'Enter the domain without "*." - only that domain is blocked, not its subdomains.');
                 return;
             }
-            email = `/^.+@${escapeRegex(email)}$/i`;
+            if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/i.test(domain)) {
+                uiFieldProblem(field, 'Enter a plain domain name, for example example.com');
+                return;
+            }
+            email = `/^.+@${escapeRegex(domain)}$/i`;
         }
     }
     
@@ -729,42 +918,40 @@ async function createSuppression() {
     let expiresAt = null;
     if (!permanent) {
         const days = parseInt(document.getElementById('new-suppression-expiry-days')?.value) || 7;
-        const d = new Date();
-        d.setDate(d.getDate() + days);
-        expiresAt = d.toISOString();
+        expiresAt = addDaysInZone(new Date(), days).toISOString();
     }
     
     try {
         const response = await authenticatedFetch('/api/suppressions', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ email, type, reason, notes: notes || null, permanent, expires_at: expiresAt })
+            body: JSON.stringify({ email, type, reason, notes: notes || null, permanent, expires_at: expiresAt,
+                queue_id: suppressionFromQueue && suppressionFromQueue.email === String(email).toLowerCase() ? suppressionFromQueue.queueId : null })
         });
         
-        if (response.status === 409) {
-            showToast('This address is already suppressed', 'error');
-            return;
-        }
-        
         if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.detail || 'Failed to create suppression');
+            const err = await response.json().catch(() => ({}));
+            if (response.status === 409 && !(err.detail && err.detail.code)) {
+                showToast('This address is already suppressed', 'error');
+                return;
+            }
+            throw new Error(`Failed to create suppression: ${uiHttpErrorText(response.status, err)}`);
         }
         
         showToast(`Suppression added: ${email}`, 'success');
-        document.getElementById('add-suppression-modal')?.remove();
+        uiCloseSavedDialog('add-suppression-modal');
         loadSuppressions();
         loadSuppressionStats();
-        // Fix #4: Auto-sync to Rspamd after changes
         autoSyncToRspamd();
+        const after = suppressionAfterAdd;
+        suppressionAfterAdd = null;
+        if (after) after();
         
     } catch (error) {
-        showToast(error.message, 'error');
+        showToast(uiErrorText(error), 'error');
     }
 }
 
-// The rows of the list on screen, by id. The Edit button passes only the id,
-// so no stored value is ever written into an inline handler.
 const suppressionItemsById = new Map();
 
 function showEditSuppressionModalById(id) {
@@ -773,68 +960,42 @@ function showEditSuppressionModalById(id) {
 }
 
 function showEditSuppressionModal(s) {
-    const modal = document.createElement('div');
-    modal.id = 'edit-suppression-modal';
-    modal.className = 'fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center p-4';
-    
     const isPermanent = !s.expires_at;
-    const currentExpiry = s.expires_at ? new Date(s.expires_at).toISOString().slice(0, 16) : '';
-    
-    modal.innerHTML = `
-        <div class="bg-white dark:bg-gray-800 rounded-lg max-w-md w-full p-6" onclick="event.stopPropagation()">
-            <h3 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Edit Suppression</h3>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mb-4 font-mono">${escapeHtml(s.email)}</p>
-            
-            <div class="space-y-4">
-                <div class="bg-gray-50 dark:bg-gray-700/50 rounded-lg p-3 text-xs text-gray-600 dark:text-gray-400">
-                    <div class="grid grid-cols-2 gap-2">
-                        <span>Reason: <strong>${s.reason.replace('_', ' ')}</strong></span>
-                        <span>Source: <strong>${s.source || 'manual'}</strong></span>
-                        ${s.bounce_count > 0 ? `<span>Bounces: <strong>${s.bounce_count}</strong></span>` : ''}
-                        <span>Created: <strong>${formatTime(s.created_at)}</strong></span>
-                    </div>
+    const currentExpiry = s.expires_at ? toZonedInputValue(s.expires_at) : '';
+
+    suppressionDialog('edit-suppression-modal', 'Edit Suppression', `
+        <p class="ui-mono ui-muted">${escapeHtml(s.email)}</p>
+        <div class="ui-md-ids ui-form-facts">
+            <div class="ui-md-fact"><span>Reason</span><div>${escapeHtml(s.reason.replace('_', ' '))}</div></div>
+            <div class="ui-md-fact"><span>Source</span><div>${escapeHtml(SUPPRESSION_SOURCE_LABELS[s.source] || s.source || 'manual')}</div></div>
+            ${s.bounce_count > 0 ? `<div class="ui-md-fact"><span>Bounces</span><div>${escapeHtml(String(s.bounce_count))}</div></div>` : ''}
+            <div class="ui-md-fact"><span>Created</span><div>${formatTime(s.created_at)}</div></div>
+        </div>
+        <label><span class="ui-label">Notes</span>
+            <input type="text" id="edit-suppression-notes" value="${escapeHtml(s.notes || '')}" class="ui-input" placeholder="Notes...">
+        </label>
+        <div>
+            <label class="ui-check-label">
+                <input type="checkbox" id="edit-suppression-permanent" class="ui-check" ${isPermanent ? 'checked' : ''} onchange="toggleEditExpiryField()">
+                Permanent block
+            </label>
+            <div id="edit-suppression-expiry-row" class="ui-form-sub ${isPermanent ? 'hidden' : ''}">
+                <label><span class="ui-label">Expiry date & time</span>
+                    <input type="datetime-local" id="edit-suppression-expiry" value="${currentExpiry}" data-shown="${currentExpiry}" class="ui-input">
+                </label>
+                <div class="ui-chip-row">
+                    <button onclick="extendExpiryBy(7)" class="ui-chip">+7 days</button>
+                    <button onclick="extendExpiryBy(14)" class="ui-chip">+14 days</button>
+                    <button onclick="extendExpiryBy(30)" class="ui-chip">+30 days</button>
+                    <button onclick="extendExpiryBy(90)" class="ui-chip">+90 days</button>
                 </div>
-                
-                <div>
-                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Notes</label>
-                    <input type="text" id="edit-suppression-notes" value="${escapeHtml(s.notes || '')}"
-                        class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg"
-                        placeholder="Notes...">
-                </div>
-                
-                <div>
-                    <label class="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox" id="edit-suppression-permanent" ${isPermanent ? 'checked' : ''}
-                            class="rounded border-gray-300 dark:border-gray-600"
-                            onchange="toggleEditExpiryField()">
-                        <span class="text-sm font-medium text-gray-700 dark:text-gray-300">Permanent block</span>
-                    </label>
-                    <div id="edit-suppression-expiry-row" class="mt-2 ${isPermanent ? 'hidden' : ''}">
-                        <label class="block text-xs text-gray-500 dark:text-gray-400 mb-1">Expiry date & time</label>
-                        <input type="datetime-local" id="edit-suppression-expiry" value="${currentExpiry}"
-                            class="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-white rounded-lg">
-                        <div class="flex gap-2 mt-2">
-                            <button onclick="extendExpiryBy(7)" class="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300">+7 days</button>
-                            <button onclick="extendExpiryBy(14)" class="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300">+14 days</button>
-                            <button onclick="extendExpiryBy(30)" class="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300">+30 days</button>
-                            <button onclick="extendExpiryBy(90)" class="px-2 py-1 text-xs rounded bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-300">+90 days</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="flex justify-end gap-2 mt-6">
-                <button onclick="document.getElementById('edit-suppression-modal').remove()" class="px-4 py-2 text-sm bg-gray-200 hover:bg-gray-300 dark:bg-gray-600 dark:hover:bg-gray-500 text-gray-700 dark:text-gray-300 rounded-lg">
-                    Cancel
-                </button>
-                <button onclick="saveEditSuppression(${s.id})" class="px-4 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white rounded-lg">
-                    Save Changes
-                </button>
             </div>
         </div>
-    `;
-    
-    document.body.appendChild(modal);
+    `, `
+        <button onclick="uiCancelDialog('edit-suppression-modal')" class="ui-btn">Cancel</button>
+        <button data-acts="outbound" onclick="saveEditSuppressionOnce(${Number(s.id)}, this)" class="ui-btn ui-btn-primary">Save Changes</button>
+    `);
+    uiGuardDialog(document.getElementById('edit-suppression-modal'));
 }
 
 function toggleEditExpiryField() {
@@ -845,13 +1006,8 @@ function toggleEditExpiryField() {
             row.classList.add('hidden');
         } else {
             row.classList.remove('hidden');
-            // If no date set, default to 7 days from now
             const input = document.getElementById('edit-suppression-expiry');
-            if (input && !input.value) {
-                const d = new Date();
-                d.setDate(d.getDate() + 7);
-                input.value = d.toISOString().slice(0, 16);
-            }
+            if (input && !input.value) input.value = toZonedInputValue(addDaysInZone(new Date(), 7));
         }
     }
 }
@@ -859,25 +1015,30 @@ function toggleEditExpiryField() {
 function extendExpiryBy(days) {
     const input = document.getElementById('edit-suppression-expiry');
     if (!input) return;
-    const base = input.value ? new Date(input.value) : new Date();
-    base.setDate(base.getDate() + days);
-    input.value = base.toISOString().slice(0, 16);
+    const base = fromZonedInputValue(input.value) || new Date();
+    input.value = toZonedInputValue(addDaysInZone(base, days));
 }
 
+function saveEditSuppressionOnce(id, button) {
+    return uiOnce(button || `suppression-edit:${id}`, () => saveEditSuppression(id), button, 'Saving...');
+}
 async function saveEditSuppression(id) {
+    if (!uiMayAct('outbound')) return;
     const notes = document.getElementById('edit-suppression-notes')?.value.trim() || null;
     const permanent = document.getElementById('edit-suppression-permanent')?.checked ?? true;
     
     let expiresAt;
     if (permanent) {
-        expiresAt = 'null';  // clear expiry = permanent
+        expiresAt = 'null';
     } else {
-        const val = document.getElementById('edit-suppression-expiry')?.value;
-        if (!val) {
+        const input = document.getElementById('edit-suppression-expiry');
+        const expiry = fromZonedInputValue(input?.value);
+        if (!expiry) {
             showToast('Please set an expiry date', 'error');
             return;
         }
-        expiresAt = new Date(val).toISOString();
+        const wasPermanent = !(suppressionItemsById.get(id) || {}).expires_at;
+        expiresAt = !wasPermanent && input.value === input.dataset.shown ? undefined : expiry.toISOString();
     }
     
     try {
@@ -887,19 +1048,23 @@ async function saveEditSuppression(id) {
             body: JSON.stringify({ notes, expires_at: expiresAt })
         });
         
-        if (!response.ok) throw new Error('Failed to update');
+        if (!response.ok) throw await suppressionFailure(response, 'Failed to update');
         
         showToast('Suppression updated', 'success');
-        document.getElementById('edit-suppression-modal')?.remove();
+        uiCloseSavedDialog('edit-suppression-modal');
         loadSuppressions();
         loadSuppressionStats();
         autoSyncToRspamd();
     } catch (error) {
-        showToast(error.message, 'error');
+        showToast(uiErrorText(error), 'error');
     }
 }
 
+function toggleSuppressionOnce(id, newActive, button) {
+    return uiOnce(`suppression-toggle:${id}`, () => toggleSuppression(id, newActive), button);
+}
 async function toggleSuppression(id, newActive) {
+    if (!uiMayAct('outbound')) return;
     try {
         const response = await authenticatedFetch(`/api/suppressions/${id}`, {
             method: 'PUT',
@@ -907,100 +1072,67 @@ async function toggleSuppression(id, newActive) {
             body: JSON.stringify({ active: newActive })
         });
         
-        if (!response.ok) throw new Error('Failed to update');
+        if (!response.ok) throw await suppressionFailure(response, 'Failed to update');
         
         showToast(`Suppression ${newActive ? 'activated' : 'deactivated'}`, 'success');
         loadSuppressions();
         loadSuppressionStats();
-        // Fix #4: Auto-sync to Rspamd after changes
         autoSyncToRspamd();
     } catch (error) {
-        showToast(error.message, 'error');
+        showToast(uiErrorText(error), 'error');
     }
 }
 
 async function deleteSuppression(id, email) {
-    if (!await showConfirmModal({ title: 'Delete Suppression', message: `Delete suppression for ${email}? This cannot be undone.`, confirmText: 'Delete', isDangerous: true })) return;
+    if (!uiMayAct('outbound')) return;
+    if (!await showConfirmModal({ title: 'Delete suppression', message: `Delete suppression for ${email}? This cannot be undone.`, confirmText: 'Delete', isDangerous: true })) return;
     
     try {
         const response = await authenticatedFetch(`/api/suppressions/${id}`, { method: 'DELETE' });
-        if (!response.ok) throw new Error('Failed to delete');
+        if (!response.ok) throw await suppressionFailure(response, 'Failed to delete');
         
         showToast(`Suppression deleted: ${email}`, 'success');
         loadSuppressions();
         loadSuppressionStats();
-        // Fix #4: Auto-sync to Rspamd after changes
         autoSyncToRspamd();
     } catch (error) {
-        showToast(error.message, 'error');
+        showToast(uiErrorText(error), 'error');
     }
 }
 
-// =============================================================================
-// SYNC & IMPORT/EXPORT
-// =============================================================================
+function suppressionListChangeText(changed) {
+    if (!changed || !(changed.list_added || changed.list_removed)) return '';
+    return `List updated from Rspamd: ${Number(changed.list_added || 0)} added, ${Number(changed.list_removed || 0)} deleted.`;
+}
 
-/**
- * Fix #4: Auto-sync suppressions to Rspamd in the background after changes.
- * Does not show UI feedback beyond a quiet toast - the manual sync button
- * provides a more verbose experience.
- */
 async function autoSyncToRspamd() {
+    if (!uiMayAct('outbound')) return;
     try {
-        const response = await authenticatedFetch('/api/suppressions/sync', { method: 'POST' });
-        if (response.ok) {
-            const result = await response.json();
-            console.log(`[autoSync] Synced ${result.synced} suppressions to Rspamd`);
-            // Refresh list to show updated sync status
-            loadSuppressions();
-            loadSuppressionStats();
-        }
+        const response = await authenticatedFetch('/api/suppressions/sync?after_change=true', { method: 'POST' });
+        const body = await response.json().catch(() => ({}));
+        const changed = response.ok ? body : (body.detail && body.detail.list_changed);
+        const text = suppressionListChangeText(changed);
+        if (text) showToast(text, 'info');
+        if (!response.ok) console.warn('[autoSync] Background sync failed:', (body.detail && body.detail.message) || response.status);
     } catch (e) {
         console.warn('[autoSync] Background sync failed:', e.message);
     }
-}
-
-async function syncSuppressionsToRspamd() {
-    const btn = document.getElementById('suppression-sync-btn');
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '<span class="loading" style="width:16px;height:16px;border-width:2px;display:inline-block;vertical-align:middle;margin-right:4px"></span> Syncing...';
-    }
-    
-    try {
-        const response = await authenticatedFetch('/api/suppressions/sync', { method: 'POST' });
-        
-        if (!response.ok) {
-            const err = await response.json();
-            throw new Error(err.detail || 'Sync failed');
-        }
-        
-        const result = await response.json();
-        showToast(`Synced ${result.synced} suppressions to Rspamd (${result.newly_synced} new)`, 'success');
-        loadSuppressions();
-        loadSuppressionStats();
-    } catch (error) {
-        showToast('Sync failed: ' + error.message, 'error');
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = `
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                        d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                </svg>
-                Sync to Rspamd
-            `;
-        }
-    }
+    loadSuppressions();
+    loadSuppressionStats();
+    loadSuppressionSyncNote();
 }
 
 function exportSuppressions() {
-    window.location.href = '/api/suppressions/export';
-    toggleSuppressionMoreMenu();
+    const link = document.createElement('a');
+    link.href = '/api/suppressions/export';
+    link.download = '';
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
 }
 
 async function importSuppressions(event) {
+    if (!uiMayAct('outbound')) return;
     const file = event.target.files[0];
     if (!file) return;
     
@@ -1013,20 +1145,18 @@ async function importSuppressions(event) {
             body: formData
         });
         
-        if (!response.ok) throw new Error('Import failed');
+        if (!response.ok) throw await responseError(response);
         
         const result = await response.json();
         showToast(`Imported ${result.imported} suppressions (${result.skipped} skipped)`, 'success');
         loadSuppressions();
         loadSuppressionStats();
-        // Fix #4: Auto-sync after import too
         autoSyncToRspamd();
     } catch (error) {
-        showToast('Import failed: ' + error.message, 'error');
+        showToast('Import failed: ' + uiErrorText(error), 'error');
     }
     
     event.target.value = '';
-    toggleSuppressionMoreMenu();
 }
 
 function clearSuppressionFilters() {
@@ -1039,71 +1169,38 @@ function clearSuppressionFilters() {
     loadSuppressions(1);
 }
 
+let suppressionMenuWasOpen = null;
+document.addEventListener('pointerdown', event => {
+    if (!(event.target instanceof Element) || !event.target.closest('#suppression-more-btn')) return;
+    const menu = document.getElementById('suppression-more-menu');
+    suppressionMenuWasOpen = !!menu && menu.matches(':popover-open');
+}, true);
 function toggleSuppressionMoreMenu() {
     const menu = document.getElementById('suppression-more-menu');
-    if (menu) menu.classList.toggle('hidden');
+    const wasOpen = suppressionMenuWasOpen;
+    suppressionMenuWasOpen = null;
+    if (!menu || typeof menu.showPopover !== 'function') return;
+    const open = menu.matches(':popover-open');
+    if (wasOpen ?? open) {
+        if (open) menu.hidePopover();
+    } else menu.showPopover();
 }
 
-// Close menu on outside click
-document.addEventListener('click', function(e) {
-    const menu = document.getElementById('suppression-more-menu');
-    if (menu && !menu.classList.contains('hidden') && !e.target.closest('#suppression-more-menu') && !e.target.closest('[onclick*="toggleSuppressionMoreMenu"]')) {
-        menu.classList.add('hidden');
-    }
-});
 
-
-// =============================================================================
-// HELPER FUNCTIONS
-// =============================================================================
-
-/**
- * Static map descriptions lookup (fallback if backend sends Rspamd's technical description)
- */
-const _MAP_META_DESCRIPTIONS = {
-    'global_mime_from_blacklist.map': 'Block emails by From header address',
-    'global_mime_from_whitelist.map': 'Allow emails by From header address',
-    'global_smtp_from_blacklist.map': 'Block by envelope sender address',
-    'global_smtp_from_whitelist.map': 'Allow by envelope sender address',
-    'global_rcpt_blacklist.map': 'Block sending to these recipient addresses',
-    'global_rcpt_whitelist.map': 'Allow sending to these recipient addresses',
-    'fishy_tlds.map': 'Suspicious TLDs (only fired in combination with bad words)',
-    'bad_words.map': 'Bad words (only fired in combination with fishy TLDs)',
-    'bad_words_de.map': 'German bad words (only fired in combination with fishy TLDs)',
-    'bad_languages.map': 'Blocked languages',
-    'bulk_header.map': 'Bulk/mass mail header patterns',
-    'bad_header.map': 'Junk mail header patterns',
-    'monitoring_nolog.map': 'Hosts excluded from logging',
-};
-
-function _getMapMetaDescription(filename) {
-    return _MAP_META_DESCRIPTIONS[filename] || null;
-}
-
-/**
- * Extract clean domain from regex pattern like /.+@example\.com/i → example.com
- */
 function _cleanRegexDomain(email) {
     if (!email || !email.startsWith('/')) return email;
-    // Match both the anchored form /^.+@example\.com$/i (optionally with the
-    // wizard's subdomain group) and the legacy unanchored /.+@example\.com/i
     const match = email.match(/^\/\^?\.\+@(?:\(\.\+\\\.\)\?)?(.+?)\$?\/i?$/);
     if (match) {
-        // Unescape dots: example\.com → example.com
         return match[1].replace(/\\\./g, '.');
     }
     return email;
 }
 
-/**
- * Regex Wizard - toggle panel visibility
- */
 function toggleRegexWizard() {
     const panel = document.getElementById('regex-wizard-panel');
     if (panel) {
         panel.classList.toggle('hidden');
         if (!panel.classList.contains('hidden')) {
-            // Focus input when opened
             const input = document.getElementById('regex-wizard-input');
             if (input) input.focus();
             updateRegexWizardPreview();
@@ -1111,9 +1208,6 @@ function toggleRegexWizard() {
     }
 }
 
-/**
- * Regex Wizard - update input label, placeholder, and preview based on selected type
- */
 function updateRegexWizardPreview() {
     const type = document.getElementById('regex-wizard-type').value;
     const input = document.getElementById('regex-wizard-input');
@@ -1123,7 +1217,6 @@ function updateRegexWizardPreview() {
     const explain = document.getElementById('regex-wizard-explain');
     const addBtn = document.getElementById('regex-wizard-add-btn');
     
-    // Update label & placeholder based on type
     const config = {
         email:          { label: 'Email address',  placeholder: 'user@example.com' },
         domain:         { label: 'Domain',          placeholder: 'example.com' },
@@ -1143,33 +1236,27 @@ function updateRegexWizardPreview() {
         return;
     }
     
-    // Generate regex based on type
     let pattern = '';
     let explanation = '';
     
-    // Escape special regex characters in user input
     const escaped = value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     
     switch (type) {
         case 'email':
-            // The map is a regexp map: a bare address would match as a
-            // substring (e@example.com also hits alice@example.com), so an
-            // exact match needs anchors
             pattern = `/^${value.toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$/i`;
             explanation = `Blocks exactly: ${value}`;
             break;
-        case 'domain':
-            // Anchored, with the @ boundary and optional subdomain labels
-            pattern = `/^.+@(.+\\.)?${escaped}$/i`;
-            explanation = `Blocks: *@${value} and all subdomains (e.g. *@sub.${value})`;
+        case 'domain': {
+            const domain = suppressionDomainInput(value).replace(/^\*\./, '');
+            pattern = `/^.+@(.+\\.)?${escapeRegex(domain)}$/i`;
+            explanation = `Blocks: *@${domain} and all subdomains (e.g. *@sub.${domain})`;
             break;
+        }
         case 'tld':
-            // Match any address ending in .tld
             pattern = `/^.+\\.${escaped}$/i`;
             explanation = `Blocks all addresses from .${value} domains`;
             break;
         case 'keyword':
-            // Match keyword anywhere in the address
             pattern = `/.*${escaped}.*/i`;
             explanation = `Blocks any address containing "${value}"`;
             break;
@@ -1181,9 +1268,6 @@ function updateRegexWizardPreview() {
     addBtn.disabled = false;
 }
 
-/**
- * Regex Wizard - add the generated pattern to the textarea
- */
 function regexWizardAdd() {
     const result = document.getElementById('regex-wizard-result');
     const textarea = document.getElementById('map-editor-content');
@@ -1193,7 +1277,6 @@ function regexWizardAdd() {
     const pattern = result.textContent;
     if (!pattern) return;
     
-    // Append to end of textarea content
     let content = textarea.value;
     if (content && !content.endsWith('\n')) {
         content += '\n';
@@ -1201,16 +1284,12 @@ function regexWizardAdd() {
     content += pattern;
     textarea.value = content;
     
-    // Trigger change event
     textarea.dispatchEvent(new Event('input'));
     
-    // Show success feedback
     showToast(`Pattern added: ${pattern}`, 'success');
     
-    // Clear input for next entry
     input.value = '';
     updateRegexWizardPreview();
     
-    // Scroll textarea to bottom to show the new entry
     textarea.scrollTop = textarea.scrollHeight;
 }

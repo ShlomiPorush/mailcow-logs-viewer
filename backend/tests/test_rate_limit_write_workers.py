@@ -1,4 +1,3 @@
-"""Rate limit writes keep database waits off the request loop."""
 import asyncio
 import threading
 from contextlib import contextmanager
@@ -49,7 +48,7 @@ def test_write_http_is_responsive(monkeypatch, path, stage):
         finally:
             sessions.append("closed")
 
-    fake = SimpleNamespace(has_rw_key=True, **{name: AsyncMock(return_value=[]) for name in [
+    fake = SimpleNamespace(has_rw_key=True, **{name: AsyncMock(return_value=[{"type": "success"}]) for name in [
         "edit_rl_mbox", "edit_rl_mboxes", "edit_rl_domain", "edit_rl_domains", "delete_rl_hash"]})
     monkeypatch.setattr(rate_limits, "mailcow_api", fake)
     monkeypatch.setattr(rate_limits, "SessionLocal", session, raising=False)
@@ -114,7 +113,7 @@ def test_write_failure_preserves_upstream_result_and_closes_sessions(monkeypatch
         calls.append(args)
         if failure == "upstream":
             raise rate_limits.MailcowAPIError("Upstream write failed")
-        return []
+        return [{"type": "success"}]
 
     fake = SimpleNamespace(has_rw_key=True, **{name: AsyncMock(side_effect=write) for name in [
         "edit_rl_mbox", "edit_rl_mboxes", "edit_rl_domains", "delete_rl_hash"]})

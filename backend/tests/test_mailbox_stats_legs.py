@@ -1,12 +1,3 @@
-"""Mailbox statistics count messages, not delivery legs (issue #36).
-
-Since a correlation describes one delivery leg, a single message can hold
-several of them: a Sieve forward, a redirect that was refused, a release from
-quarantine. Counting the rows made a mailbox look like it had sent mail it
-never wrote, and a refused attempt raised its failure rate even when the same
-message was delivered a moment later. Each message now counts once per
-mailbox, represented by its most successful leg.
-"""
 import asyncio
 import uuid
 from datetime import datetime, timedelta
@@ -36,7 +27,6 @@ def _postgres_available() -> bool:
 def _cleanup():
     from app.database import get_db_context
     from app.models import MailboxStatistics, MessageCorrelation
-    from app.routers.mailbox_stats import clear_stats_cache
     with get_db_context() as db:
         db.query(MessageCorrelation).filter(
             MessageCorrelation.correlation_key.like(f'%{MARK}')
@@ -44,7 +34,6 @@ def _cleanup():
         db.query(MailboxStatistics).filter(
             MailboxStatistics.domain == DOMAIN).delete(synchronize_session=False)
         db.commit()
-    clear_stats_cache()
 
 
 @pytest.fixture()
@@ -63,14 +52,11 @@ def env():
     _cleanup()
 
 
-# ---------- seeding helpers ----------
-
 def _msgid():
     return f'<{uuid.uuid4().hex}@{MARK}>'
 
 
 def _leg(sender, recipient, status, message_id, direction='internal', age_minutes=1):
-    """One delivery leg of a message, as the correlation jobs would store it."""
     from app.database import get_db_context
     from app.models import MessageCorrelation
     when = datetime.utcnow() - timedelta(minutes=age_minutes)
@@ -86,11 +72,6 @@ def _leg(sender, recipient, status, message_id, direction='internal', age_minute
 
 
 def _seed_forward_scenario():
-    """One message, three legs, exactly as it happens on a live server.
-
-    An inbound delivery, the Sieve redirect it triggered and that Rspamd
-    refused, and the same redirect again after the message was released.
-    """
     msgid = _msgid()
     _leg(REMOTE, LOCAL_USER, 'delivered', msgid, direction='inbound', age_minutes=5)
     _leg(LOCAL_USER, OTHER_USER, 'rejected', msgid, age_minutes=4)
@@ -98,13 +79,9 @@ def _seed_forward_scenario():
     return msgid
 
 
-# ---------- endpoint helpers ----------
-
 def _mailboxes():
-    """Call the Mailbox Statistics list the way FastAPI calls it."""
     from app.database import get_db_context
-    from app.routers.mailbox_stats import clear_stats_cache, get_all_mailbox_stats
-    clear_stats_cache()
+    from app.routers.mailbox_stats import get_all_mailbox_stats
     with get_db_context() as db:
         payload = get_all_mailbox_stats(
             domain=DOMAIN, active_only=False, hide_zero=False, search=None,
@@ -124,11 +101,7 @@ def _summary():
     return payload
 
 
-# ---------- the regression ----------
-
 def test_a_forwarded_message_counts_once_and_is_not_a_failure(env):
-    """THE issue: the forward legs were counted as mail of their own, and the
-    refused attempt raised the failure rate of a message that was delivered."""
     _seed_forward_scenario()
 
     rows = _mailboxes()
@@ -147,11 +120,18 @@ def test_a_forwarded_message_counts_once_and_is_not_a_failure(env):
 
 
 def test_correlations_without_a_message_id_are_never_merged(env):
-    """Nothing says two messages without a Message-ID are the same message."""
     _leg(LOCAL_USER, REMOTE, 'delivered', None, direction='outbound')
     _leg(LOCAL_USER, REMOTE, 'delivered', None, direction='outbound', age_minutes=2)
 
     assert _mailboxes()[LOCAL_USER]['mailbox_counts']['sent_total'] == 2
+
+
+def test_correlations_with_an_empty_message_id_are_never_merged(env):
+    _leg(LOCAL_USER, REMOTE, 'delivered', '', direction='outbound')
+    _leg(LOCAL_USER, REMOTE, 'bounced', '', direction='outbound')
+    counts = _mailboxes()[LOCAL_USER]['mailbox_counts']
+    assert counts['sent_total'] == 2
+    assert counts['sent_failed'] == 1
 
 
 def test_two_messages_from_one_mailbox_count_twice(env):
@@ -166,7 +146,6 @@ def test_two_messages_from_one_mailbox_count_twice(env):
 
 
 def test_the_best_of_two_unsuccessful_legs_represents_the_message(env):
-    """Nothing was delivered here, so the least bad outcome is the one shown."""
     msgid = _msgid()
     _leg(LOCAL_USER, REMOTE, 'deferred', msgid, direction='outbound', age_minutes=4)
     _leg(LOCAL_USER, REMOTE, 'bounced', msgid, direction='outbound', age_minutes=3)
@@ -178,7 +157,6 @@ def test_the_best_of_two_unsuccessful_legs_represents_the_message(env):
 
 
 def test_summary_totals_count_the_message_once(env):
-    """The summary cards and the mailbox rows must tell the same story."""
     before = _summary()
     _seed_forward_scenario()
     after = _summary()

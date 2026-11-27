@@ -1,4 +1,3 @@
-"""Report management returns correct counts with a constant query budget."""
 import uuid
 from datetime import datetime, timedelta
 import pytest
@@ -57,12 +56,13 @@ def test_report_counts_and_query_budget(size):
         dates = [row["created_at"] for row in result["reports"]]
         assert dates == sorted(dates, reverse=True)
         assert all(set(row) == {"id", "type", "domain", "org_name", "begin_date", "end_date",
-                               "record_count", "created_at", "report_id"} for row in result["reports"])
+                               "record_count", "created_at", "report_id", "shared_report_id"}
+                   for row in result["reports"])
         for statement in statements:
             assert "raw_xml" not in statement
             assert "raw_json" not in statement
             assert "policy_published" not in statement
-        assert len(statements) == 2, f"Executed {len(statements)} queries for {size * 2} reports"
+        assert len(statements) == (4 if size else 2), f"Executed {len(statements)} queries for {size * 2} reports"
 
         app = FastAPI()
         app.include_router(router)
@@ -87,7 +87,7 @@ def test_report_counts_and_query_budget(size):
                 assert payload["page"] == page
                 assert payload["total_pages"] == pages
                 assert payload["limit"] == 7
-                assert len(statements) <= 4
+                assert len(statements) <= 6
                 for statement in statements:
                     assert "raw_xml" not in statement
                     assert "raw_json" not in statement
@@ -96,7 +96,6 @@ def test_report_counts_and_query_budget(size):
                     assert key not in seen
                     seen[key] = row["record_count"]
             assert seen == expected
-            # Equal timestamps across report types must not shuffle between pages.
             first = client.get("/dmarc/reports/all?page=1&limit=7").json()
             assert [(r["type"], r["id"]) for r in first["reports"]] == list(seen)[:7]
             assert client.get("/dmarc/reports/all?page=999&limit=7").json()["page"] == pages
@@ -106,7 +105,6 @@ def test_report_counts_and_query_budget(size):
                 ordered = sorted(result["reports"], key=lambda row: (
                     -datetime.fromisoformat(row["created_at"]).timestamp(), row["type"], -row["id"]))
                 assert list(seen) == [(row["type"], row["id"]) for row in ordered]
-                # Removing a final page must land on the last remaining page.
                 last_id = ordered[-1]["id"]
                 with Session(isolated) as db:
                     db.query(DMARCRecord).delete()

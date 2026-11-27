@@ -1,9 +1,9 @@
-"""Tests for shared utility helpers."""
+import secrets
 from datetime import datetime, timezone, timedelta
 
 from fastapi import HTTPException
 
-from app.utils import ensure_timezone_aware, format_datetime_for_api, internal_error
+from app.utils import format_datetime_for_api, internal_error
 
 
 def test_format_datetime_naive_assumed_utc():
@@ -26,19 +26,12 @@ def test_format_datetime_strips_microseconds():
     assert format_datetime_for_api(dt) == "2026-01-12T10:30:00Z"
 
 
-def test_ensure_timezone_aware():
-    naive = datetime(2026, 1, 12, 10, 0, 0)
-    aware = ensure_timezone_aware(naive)
-    assert aware.tzinfo == timezone.utc
-    already = datetime(2026, 1, 12, 10, 0, 0, tzinfo=timezone(timedelta(hours=3)))
-    assert ensure_timezone_aware(already) is already
-
-
 def test_internal_error_hides_details_by_default():
-    exc = internal_error(ValueError("postgres://user:secret@db/prod exploded"))
+    password = secrets.token_hex(8)
+    exc = internal_error(ValueError(f"postgres://user:{password}@db/prod exploded"))
     assert isinstance(exc, HTTPException)
     assert exc.status_code == 500
-    assert "secret" not in exc.detail
+    assert password not in exc.detail
     assert exc.detail == "Internal server error"
 
 

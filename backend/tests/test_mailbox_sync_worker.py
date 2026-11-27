@@ -1,4 +1,3 @@
-"""Mailbox synchronization must not block the event loop on persistence."""
 import asyncio
 import threading
 from contextlib import contextmanager

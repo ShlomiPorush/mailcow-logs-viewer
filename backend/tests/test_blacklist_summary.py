@@ -1,8 +1,3 @@
-"""
-Tests for the aggregated dashboard blacklist summary:
-aggregate_blacklist_summary combines the latest check of every active
-monitored host into the /api/blacklist/summary payload.
-"""
 from datetime import datetime, timedelta, timezone
 
 from app.services.blacklist_service import (
@@ -77,7 +72,7 @@ def test_all_clean_is_clean():
     assert result["status"] == "clean"
     assert result["has_data"] is True
     assert result["listed_count"] == 0
-    assert result["total_blacklists"] == 42  # sum across hosts
+    assert result["total_blacklists"] == 42
 
 
 def test_listed_count_is_sum_across_hosts():
@@ -91,15 +86,24 @@ def test_listed_count_is_sum_across_hosts():
     assert result["hosts_listed"] == 2
 
 
+def test_each_host_reports_its_own_list_count():
+    result = aggregate_blacklist_summary([
+        host("a", "clean", 0, 30, FRESH),
+        host("b", "listed", 1, 30, FRESH),
+        host("c", "clean", 0, 4, FRESH),
+    ], now=NOW)
+    listed = [h for h in result["hosts"] if h["status"] == "listed"]
+    assert [(h["hostname"], h["listed_count"], h["total_blacklists"]) for h in listed] == [("b", 1, 30)]
+    assert result["hosts"][2]["total_blacklists"] == 4
+
+
 def test_stale_check_counts_as_no_data():
-    # Preserves the old single-host behavior: has_data drops after the TTL
     result = aggregate_blacklist_summary(
         [host("a", "listed", 2, 30, STALE)], now=NOW)
     assert result["has_data"] is False
     assert result["status"] == "unknown"
     assert result["listed_count"] == 0
     assert result["hosts"][0]["status"] == "unknown"
-    # checked_at still reports the last known check time
     assert result["checked_at"] is not None
 
 
@@ -155,8 +159,10 @@ def test_hosts_detail_shape():
         "source": "system",
         "status": "listed",
         "listed_count": 2,
+        "total_blacklists": 30,
         "checked_at": FRESH.isoformat().replace('+00:00', '') + 'Z',
     }
     assert result["hosts"][1]["status"] == "unknown"
     assert result["hosts"][1]["listed_count"] == 0
     assert result["hosts"][1]["checked_at"] is None
+    assert result["hosts"][1]["total_blacklists"] is None

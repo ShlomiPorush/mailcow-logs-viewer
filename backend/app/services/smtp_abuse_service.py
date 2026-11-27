@@ -1,18 +1,3 @@
-"""
-SMTP abuse protection - enforcement layer.
-
-Where anomaly detection *alerts* on a mailbox sending far above its own
-baseline, this module *acts*: when a mailbox crosses a hard outbound ceiling
-it disables SMTP for that mailbox via the mailcow API (IMAP stays up, so the
-user keeps their mail), optionally revokes its app passwords, records the
-action, raises a SecurityAlert, and notifies both the operator and the user.
-
-Detection alerts never act on their own; this module is the enforcement
-path, sharing the alerting and notification layer with anomaly detection.
-
-Async functions touch the mailcow API; every database access is a plain sync
-helper executed through ``asyncio.to_thread`` so the event loop never blocks.
-"""
 import asyncio
 import logging
 from datetime import datetime, timedelta
@@ -21,8 +6,10 @@ from typing import Dict, List, Optional
 from sqlalchemy import func
 
 from ..config import settings
+from ..correlation import authenticated_submissions, submitting_mailbox
 from ..database import get_db_context
-from ..mailcow_api import mailcow_api
+from ..mailcow_api import (MailcowShownError, MailcowWriteUnknownError, mailcow_api, mailcow_handled_items,
+                           mailcow_reply)
 from ..models import (
     MessageCorrelation,
     SecurityAlert,
@@ -37,25 +24,19 @@ def normalize(email: str) -> str:
     return (email or "").strip().lower()
 
 
-# ── sync DB helpers (run via asyncio.to_thread from async callers) ──────────
-
 def fetch_outbound_counts(window_minutes: int, limit: Optional[int] = None) -> Dict[str, int]:
-    """Outbound message count per sender within the rolling window.
-
-    Grouped on lower(sender) so 'User@x' and 'user@x' are one mailbox - the
-    same normalisation used everywhere else for addresses.
-    """
     cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
+    mailbox = submitting_mailbox()
     with get_db_context() as db:
-        q = db.query(
-            func.lower(MessageCorrelation.sender).label("email"),
+        q = authenticated_submissions(db.query(
+            mailbox.label("email"),
             func.count(MessageCorrelation.id).label("count"),
-        ).filter(
+        )).filter(
             func.lower(MessageCorrelation.direction) == "outbound",
             MessageCorrelation.first_seen >= cutoff,
-            MessageCorrelation.sender.isnot(None),
-            MessageCorrelation.sender != "",
-        ).group_by(func.lower(MessageCorrelation.sender)).order_by(
+            mailbox.isnot(None),
+            mailbox != "",
+        ).group_by(mailbox).order_by(
             func.count(MessageCorrelation.id).desc()
         )
         if limit:
@@ -75,7 +56,6 @@ def fetch_whitelist(active_only: bool = True) -> List[Dict]:
 
 
 def fetch_latest_actions() -> Dict[str, Dict]:
-    """Most recent action per mailbox - this is the current block state."""
     with get_db_context() as db:
         latest = db.query(
             SMTPAbuseAction.email.label("email"),
@@ -117,14 +97,15 @@ def record_action(email: str, count: int, action: str, automatic: bool,
 
 
 def record_security_alert(email: str, count: int, revoked: int, automatic: bool) -> None:
-    """Surface the block in the same dashboard feed as anomaly detection."""
     detail = (
         f"SMTP sending was disabled for {email} after {count} outbound messages "
         f"in {settings.smtp_abuse_window_minutes} minutes "
         f"(limit: {settings.smtp_abuse_threshold}).\n\n"
-        f"IMAP access is unchanged. App passwords revoked: {revoked}.\n"
+        + ("Its app passwords were revoked, so mail apps that signed in with one stop working. "
+           if revoked else "IMAP access is unchanged. ")
+        + f"App passwords revoked: {revoked}.\n"
         "Review the mailbox, reset its password, then re-enable SMTP from "
-        "Security → Abuse Protection."
+        "Security → Settings → Outgoing spam."
     )
     with get_db_context() as db:
         db.add(SecurityAlert(
@@ -141,8 +122,6 @@ def record_security_alert(email: str, count: int, revoked: int, automatic: bool)
 
 
 def set_whitelist(emails: List[str]) -> List[str]:
-    """Replace the active whitelist with exactly this set (rows are kept and
-    deactivated rather than deleted, so notes survive a round-trip)."""
     wanted = {normalize(e) for e in emails if normalize(e)}
     with get_db_context() as db:
         existing = {r.email: r for r in db.query(SMTPAbuseWhitelist).all()}
@@ -177,15 +156,7 @@ def deactivate_whitelist_entry(email: str) -> bool:
         return True
 
 
-# ── enforcement decisions ──────────────────────────────────────────────────
-
 def in_unblock_grace(latest: Optional[Dict]) -> bool:
-    """True if an operator re-enabled SMTP recently.
-
-    Without this, re-enabling a mailbox while its rolling count is still above
-    the threshold gets undone by the very next job run - the operator's action
-    would appear to do nothing.
-    """
     if not latest or latest.get("action") != "unblocked":
         return False
     grace = settings.smtp_abuse_unblock_grace_minutes
@@ -198,7 +169,6 @@ def in_unblock_grace(latest: Optional[Dict]) -> bool:
 
 
 def find_candidates() -> List[Dict]:
-    """Mailboxes that should be auto-blocked right now (sync; DB only)."""
     counts = fetch_outbound_counts(settings.smtp_abuse_window_minutes)
     whitelist = {e["email"] for e in fetch_whitelist()}
     latest_actions = fetch_latest_actions()
@@ -211,7 +181,7 @@ def find_candidates() -> List[Dict]:
             continue
         latest = latest_actions.get(email)
         if latest and latest.get("action") == "blocked":
-            continue  # already blocked
+            continue
         if in_unblock_grace(latest):
             logger.info("[SMTP ABUSE] %s is over the limit but was recently "
                         "re-enabled by an operator - skipping (grace period)", email)
@@ -219,8 +189,6 @@ def find_candidates() -> List[Dict]:
         candidates.append({"email": email, "count": count})
     return candidates
 
-
-# ── async actions (mailcow API) ────────────────────────────────────────────
 
 async def _revoke_app_passwords(email: str) -> int:
     entries = await mailcow_api.get_app_passwords(email)
@@ -231,8 +199,7 @@ async def _revoke_app_passwords(email: str) -> int:
     return len(ids)
 
 
-async def _notify_user_blocked(email: str, count: int) -> None:
-    """Tell the mailbox owner their SMTP was disabled (best effort)."""
+async def _notify_user_blocked(email: str, count: int, revoked: int = 0) -> None:
     if not settings.notification_smtp_configured:
         logger.info("SMTP not configured - skipping user notification for %s", email)
         return
@@ -246,27 +213,42 @@ async def _notify_user_blocked(email: str, count: int) -> None:
         f"{settings.smtp_abuse_window_minutes} minutes, above the limit of "
         f"{settings.smtp_abuse_threshold}. This usually means the account is "
         "compromised.\n\n"
-        "You can still receive and read mail (IMAP is unaffected).\n\n"
-        "Please change your password and revoke any app passwords you no "
+        + ("You can still receive mail. Your app passwords were removed, so a mail app "
+           "that used one needs a new one.\n\n"
+           if revoked else "You can still receive and read mail.\n\n")
+        + "Please change your password and revoke any app passwords you no "
         f"longer use, then contact {contact} to restore sending."
     )
-    html = text.replace("\n", "<br>")
+    from . import email_layout as e
+    html = e.render(
+        title="Sending is paused for your account", topic='Security', tone='fail',
+        intro=f"Your account {email} sent {count} messages in {settings.smtp_abuse_window_minutes} minutes, "
+              f"above the limit of {settings.smtp_abuse_threshold}. This usually means someone else "
+              "is using the account.",
+        blocks=[
+            e.banner('ok', 'You can still receive and read mail',
+                     'Only sending is paused. Your app passwords were removed, so a mail app that '
+                     'used one needs a new one.' if revoked else 'Only sending is paused.'),
+            e.panel('What to do', e.panel_text(
+                "1. Change your password.\n"
+                "2. Remove any app passwords you no longer use.\n"
+                f"3. Contact {contact} to turn sending back on.")),
+        ],
+        footer="This message was sent to you automatically by your mail server.")
     await asyncio.to_thread(send_notification_email, email, subject, text, html)
 
 
 def _ensure_mailcow_success(email: str, response, action: str) -> None:
-    """mailcow answers HTTP 200 even for logical failures (items with
-    type "danger", e.g. when the address is an alias, not a mailbox). The
-    action must not be recorded as done when nothing actually changed -
-    an unrecorded failure is retried on the next run."""
-    items = response if isinstance(response, list) else [response] if isinstance(response, dict) else []
-    for item in items:
-        if isinstance(item, dict) and item.get("type") == "danger":
-            raise RuntimeError(f"mailcow rejected {action} for {email}: {item.get('msg')}")
+    if mailcow_handled_items(response, [email]):
+        return
+    refusal = next((item.get("msg") for item in mailcow_reply(response)
+                    if item.get("type") != "success" and item.get("msg")), None)
+    if refusal:
+        raise MailcowShownError(f"mailcow did not {action} for {email}: {refusal}")
+    raise MailcowWriteUnknownError(f"{action} for {email}: {response}")
 
 
 async def _notify_operator_blocked(email: str, count: int, revoked: int) -> None:
-    """Alert the operator through every configured channel (email + webhook)."""
     from .notification_service import notify
 
     subject = f"[Security] SMTP disabled (abuse protection): {email}"
@@ -275,22 +257,37 @@ async def _notify_operator_blocked(email: str, count: int, revoked: int) -> None
         f"{settings.smtp_abuse_window_minutes} minutes "
         f"(limit: {settings.smtp_abuse_threshold}).\n\n"
         f"SMTP has been disabled for this mailbox. App passwords revoked: {revoked}.\n"
-        "IMAP access is unchanged. Re-enable from Security → Abuse Protection "
-        "after securing the account."
+        + ("The mailbox still receives mail; mail apps that signed in with a revoked app password stop working. "
+           if revoked else "The mailbox still receives mail, and IMAP access is unchanged. ")
+        + "Re-enable from Security → Settings → Outgoing spam after securing the account."
     )
-    await asyncio.to_thread(notify, subject, text, None, None, "security")
+    from . import email_layout as e
+    html = e.render(
+        title=f"Sending is off for {email}", topic='Security', tone='fail',
+        intro=f"The mailbox sent {count} messages in {settings.smtp_abuse_window_minutes} minutes, "
+              f"above the limit of {settings.smtp_abuse_threshold}. Abuse protection turned SMTP off.",
+        blocks=[
+            e.stats([
+                ('Sent', count, 'fail', f"in {settings.smtp_abuse_window_minutes} minutes"),
+                ('Limit', settings.smtp_abuse_threshold),
+                ('App passwords revoked', revoked),
+            ]),
+            e.banner('warn', 'What to do',
+                     "Secure the account, then turn sending back on from Security, Settings, Outgoing spam. "
+                     + ("Its app passwords were revoked, so mail apps that used one need a new one."
+                        if revoked else "Receiving mail (IMAP) still works.")),
+        ],
+        footer="Outgoing spam protection is on in Settings, Outgoing spam.")
+    await asyncio.to_thread(notify, subject, text, html, None, "security")
 
 
 async def block_mailbox(email: str, count: int, automatic: bool = False,
                         operator: str = "system") -> Dict:
-    """Disable SMTP for a mailbox, record it, alert, and notify."""
     email = normalize(email)
 
-    # 1. The actual enforcement - everything else is best effort around it
     response = await mailcow_api.edit_mailbox(email, {"smtp_access": "0"})
     _ensure_mailcow_success(email, response, "disable SMTP")
 
-    # 2. A compromised mailbox usually sends via an app password
     revoked = 0
     if settings.smtp_abuse_revoke_app_passwords:
         try:
@@ -298,20 +295,18 @@ async def block_mailbox(email: str, count: int, automatic: bool = False,
         except Exception as e:
             logger.error("Could not revoke app passwords for %s: %s", email, e)
 
-    # 3. Audit trail + dashboard alert
     await asyncio.to_thread(record_action, email, count, "blocked", automatic, operator, revoked)
     try:
         await asyncio.to_thread(record_security_alert, email, count, revoked, automatic)
     except Exception as e:
         logger.error("Could not record security alert for %s: %s", email, e)
 
-    # 4. Notifications (operator + the affected user)
     try:
         await _notify_operator_blocked(email, count, revoked)
     except Exception as e:
         logger.error("Could not notify operator about %s: %s", email, e)
     try:
-        await _notify_user_blocked(email, count)
+        await _notify_user_blocked(email, count, revoked)
     except Exception as e:
         logger.error("Could not notify %s: %s", email, e)
 
@@ -326,8 +321,6 @@ async def block_mailbox(email: str, count: int, automatic: bool = False,
 
 
 async def unblock_mailbox(email: str, operator: str = "manual") -> Dict:
-    """Re-enable SMTP. Starts the grace period that prevents an immediate
-    automatic re-block while the rolling window still holds old messages."""
     email = normalize(email)
     response = await mailcow_api.edit_mailbox(email, {"smtp_access": "1"})
     _ensure_mailcow_success(email, response, "re-enable SMTP")
@@ -338,7 +331,6 @@ async def unblock_mailbox(email: str, operator: str = "manual") -> Dict:
 
 
 async def run_abuse_protection() -> Dict:
-    """Scheduler entry point: block everything currently over the limit."""
     if not settings.smtp_abuse_enabled:
         return {"status": "disabled"}
     if not mailcow_api.has_rw_key:
@@ -347,11 +339,13 @@ async def run_abuse_protection() -> Dict:
 
     candidates = await asyncio.to_thread(find_candidates)
     blocked = []
+    failed = []
     for candidate in candidates:
         try:
             await block_mailbox(candidate["email"], candidate["count"],
                                 automatic=True, operator="smtp-abuse")
             blocked.append(candidate["email"])
         except Exception as e:
+            failed.append(candidate["email"])
             logger.error("[SMTP ABUSE] Failed to block %s: %s", candidate["email"], e)
-    return {"status": "ok", "blocked": blocked, "checked": len(candidates)}
+    return {"status": "ok", "blocked": blocked, "failed": failed, "checked": len(candidates)}

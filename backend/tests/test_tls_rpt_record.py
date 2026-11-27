@@ -1,6 +1,3 @@
-"""TLS-RPT record checks (RFC 8460): the _smtp._tls TXT record that tells
-sending servers where to deliver TLS reports. DNS is injected; no live
-lookups (the repository's rule for network-facing code)."""
 import asyncio
 
 import pytest
@@ -34,8 +31,6 @@ def test_valid_record_is_success_and_lists_report_addresses(monkeypatch):
 
 
 def test_missing_record_is_a_warning_not_an_error(monkeypatch):
-    """TLS-RPT is optional. The message must contain 'not published' so
-    detect_dns_changes treats a later removal as definitive."""
     result = _check(monkeypatch, {})
     assert result['status'] == 'warning'
     assert 'not published' in result['message']
@@ -104,13 +99,11 @@ def test_change_detection_fires_on_record_change_and_removal():
     assert hiccup == []
 
     removed = domains.detect_dns_changes(Prev(), {
-        'tls_rpt': {'status': 'warning', 'message': 'TLS-RPT record not published', 'record': None}})
+        'tls_rpt': {'status': 'warning', 'message': 'TLS-RPT record not published', 'record': None, 'absent': True}})
     assert removed == [{'type': 'TLS-RPT', 'old': 'v=TLSRPTv1; rua=mailto:old@example.test', 'new': '(removed)'}]
 
 
 def test_first_check_after_upgrade_does_not_alert():
-    """Rows stored before this check existed have no TLS-RPT result. Finding a
-    record on the first check after upgrading is not a change."""
     class Upgraded(Prev):
         tls_rpt_check = None
 

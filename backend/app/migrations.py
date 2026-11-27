@@ -1,16 +1,8 @@
-"""
-Database migrations and maintenance utilities
-
-FROZEN as of v2.6.3: everything in this file is the legacy, pre-Alembic
-migration path and must not grow. New schema changes go into Alembic
-revisions under backend/alembic/versions/ (see backend/alembic/README.md).
-run_alembic_upgrade() at the bottom of this file applies them on startup.
-"""
 import logging
 from pathlib import Path
 
 from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 
 from .database import SessionLocal
 from .models import MessageCorrelation, PostfixLog, RspamdLog
@@ -18,31 +10,19 @@ from .models import MessageCorrelation, PostfixLog, RspamdLog
 logger = logging.getLogger(__name__)
 
 
+_MERGED_COLUMNS = (
+    MessageCorrelation.id, MessageCorrelation.correlation_key, MessageCorrelation.message_id,
+    MessageCorrelation.queue_id, MessageCorrelation.postfix_log_ids, MessageCorrelation.rspamd_log_id,
+    MessageCorrelation.sender, MessageCorrelation.recipient, MessageCorrelation.subject,
+    MessageCorrelation.direction, MessageCorrelation.final_status, MessageCorrelation.first_seen,
+    MessageCorrelation.last_seen,
+)
+
+
 def cleanup_duplicate_correlations(db: Session) -> int:
-    """
-    Clean up duplicate correlations of the same delivery
-
-    A delivery is identified by (Message-ID, Postfix queue chain), so two legs
-    of one message - a forward, a Sieve redirect, any re-submission - are two
-    real deliveries and NOT duplicates (issue #36). Only rows that describe the
-    same leg are merged.
-
-    Strategy:
-    1. Find (Message-ID, Queue-ID) pairs with multiple correlations
-    2. For each, keep the oldest correlation
-    3. Merge postfix_log_ids and rspamd_log_id from duplicates
-    4. Update all related logs to point to the kept correlation
-    5. Delete the duplicates
-
-    Returns:
-        Number of duplicate correlations removed
-    """
     logger.info("Checking for duplicate correlations by Message-ID and Queue-ID...")
 
     try:
-        # Find deliveries recorded more than once. Queue-less rows of one
-        # Message-ID group together (GROUP BY treats NULLs as equal), which is
-        # right: those are all the same not-yet-delivered message.
         query = text("""
             SELECT message_id, queue_id, array_agg(correlation_key ORDER BY first_seen) as keys, COUNT(*) as count
             FROM message_correlations
@@ -60,64 +40,57 @@ def cleanup_duplicate_correlations(db: Session) -> int:
 
         logger.info(f"Found {len(duplicates)} deliveries with duplicate correlations")
 
+        has_written = db.execute(text(
+            "SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() "
+            "AND table_name = 'message_correlations' AND column_name = 'written_recipients'")).first() is not None
+        columns = _MERGED_COLUMNS + ((MessageCorrelation.written_recipients,) if has_written else ())
+
         total_removed = 0
         for message_id, queue_id, correlation_keys, count in duplicates:
-            # Get all correlations for this delivery (ordered by first_seen)
             leg_filter = (
                 MessageCorrelation.queue_id == queue_id if queue_id
                 else MessageCorrelation.queue_id.is_(None)
             )
-            correlations = db.query(MessageCorrelation).filter(
+            correlations = db.query(MessageCorrelation).options(load_only(*columns)).filter(
                 MessageCorrelation.message_id == message_id,
                 leg_filter
-            ).order_by(MessageCorrelation.first_seen).all()
+            ).order_by(MessageCorrelation.first_seen, MessageCorrelation.id).all()
 
             if len(correlations) <= 1:
                 continue
             
-            # Keep the first (oldest) correlation
             primary = correlations[0]
             duplicates_to_remove = correlations[1:]
             
             logger.info(f"Merging {len(duplicates_to_remove)} duplicate correlations for Message-ID {message_id[:50]}")
             
-            # Merge data from duplicates into primary
             all_postfix_ids = set(primary.postfix_log_ids or [])
             
             for dup in duplicates_to_remove:
-                # Merge postfix_log_ids
                 if dup.postfix_log_ids:
                     all_postfix_ids.update(dup.postfix_log_ids)
                 
-                # Update rspamd_log_id if primary doesn't have one
                 if not primary.rspamd_log_id and dup.rspamd_log_id:
                     primary.rspamd_log_id = dup.rspamd_log_id
                 
-                # Update queue_id if primary doesn't have one
                 if not primary.queue_id and dup.queue_id:
                     primary.queue_id = dup.queue_id
                 
-                # Update sender if missing
                 if not primary.sender and dup.sender:
                     primary.sender = dup.sender
                 
-                # Update recipient if missing
                 if not primary.recipient and dup.recipient:
                     primary.recipient = dup.recipient
                 
-                # Update subject if missing
                 if not primary.subject and dup.subject:
                     primary.subject = dup.subject
                 
-                # Update direction if missing
                 if not primary.direction and dup.direction:
                     primary.direction = dup.direction
                 
-                # Update timestamps if needed
                 if dup.last_seen > primary.last_seen:
                     primary.last_seen = dup.last_seen
                 
-                # Update status (priority: bounced > rejected > deferred > spam > delivered)
                 if dup.final_status:
                     if dup.final_status in ['bounced', 'rejected']:
                         primary.final_status = dup.final_status
@@ -128,10 +101,16 @@ def cleanup_duplicate_correlations(db: Session) -> int:
                     elif dup.final_status == 'delivered' and not primary.final_status:
                         primary.final_status = dup.final_status
             
-            # Update primary correlation with merged data
             primary.postfix_log_ids = sorted(list(all_postfix_ids))
+
+            if has_written:
+                written = {}
+                for row in reversed(correlations):
+                    if isinstance(row.written_recipients, dict):
+                        written.update(row.written_recipients)
+                if written:
+                    primary.written_recipients = written
             
-            # Update all Postfix logs to point to the primary correlation
             if all_postfix_ids:
                 db.query(PostfixLog).filter(
                     PostfixLog.id.in_(all_postfix_ids)
@@ -140,7 +119,6 @@ def cleanup_duplicate_correlations(db: Session) -> int:
                     synchronize_session=False
                 )
             
-            # Update Rspamd log to point to the primary correlation
             if primary.rspamd_log_id:
                 db.query(RspamdLog).filter(
                     RspamdLog.id == primary.rspamd_log_id
@@ -149,7 +127,6 @@ def cleanup_duplicate_correlations(db: Session) -> int:
                     synchronize_session=False
                 )
             
-            # Delete the duplicates
             for dup in duplicates_to_remove:
                 db.delete(dup)
                 total_removed += 1
@@ -165,28 +142,21 @@ def cleanup_duplicate_correlations(db: Session) -> int:
 
 
 def add_message_id_indexes(db: Session):
-    """
-    Add indexes for Message-ID columns if they don't exist
-    Critical for performance with the new Message-ID-based correlation
-    """
     logger.info("Ensuring Message-ID indexes exist...")
     
     try:
-        # Check and create index for PostfixLog.message_id
         db.execute(text("""
             CREATE INDEX IF NOT EXISTS idx_postfix_message_id 
             ON postfix_logs (message_id)
             WHERE message_id IS NOT NULL
         """))
         
-        # Check and create index for RspamdLog.message_id  
         db.execute(text("""
             CREATE INDEX IF NOT EXISTS idx_rspamd_message_id 
             ON rspamd_logs (message_id)
             WHERE message_id IS NOT NULL
         """))
         
-        # Check and create index for MessageCorrelation.message_id
         db.execute(text("""
             CREATE INDEX IF NOT EXISTS idx_correlation_message_id 
             ON message_correlations (message_id)
@@ -202,14 +172,9 @@ def add_message_id_indexes(db: Session):
 
 
 def add_is_complete_column(db: Session):
-    """
-    Add is_complete column to message_correlations if it doesn't exist
-    This tracks whether we've found all Postfix logs for a correlation
-    """
     logger.info("Checking if is_complete column exists...")
     
     try:
-        # Check if column exists
         result = db.execute(text("""
             SELECT column_name 
             FROM information_schema.columns 
@@ -220,19 +185,16 @@ def add_is_complete_column(db: Session):
         if result.fetchone() is None:
             logger.info("Adding is_complete column...")
             
-            # Add column
             db.execute(text("""
                 ALTER TABLE message_correlations 
                 ADD COLUMN is_complete BOOLEAN DEFAULT FALSE
             """))
             
-            # Add index
             db.execute(text("""
                 CREATE INDEX idx_correlation_is_complete 
                 ON message_correlations (is_complete)
             """))
             
-            # Mark existing correlations with Queue-ID as complete
             db.execute(text("""
                 UPDATE message_correlations 
                 SET is_complete = TRUE 
@@ -251,110 +213,7 @@ def add_is_complete_column(db: Session):
         db.rollback()
 
 
-def ensure_domain_dns_checks_table(db: Session):
-    """Ensure domain_dns_checks table exists"""
-    logger.info("Checking if domain_dns_checks table exists...")
-    
-    try:
-        result = db.execute(text("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'domain_dns_checks'
-            );
-        """))
-        
-        table_exists = result.fetchone()[0]
-        
-        if table_exists:
-            logger.info("domain_dns_checks table already exists")
-            return
-        
-        logger.info("Creating domain_dns_checks table...")
-        
-        try:
-            db.execute(text("""
-                CREATE TABLE domain_dns_checks (
-                    id SERIAL PRIMARY KEY,
-                    domain_name VARCHAR(255) NOT NULL UNIQUE,
-                    spf_check JSONB,
-                    dkim_check JSONB,
-                    dmarc_check JSONB,
-                    checked_at TIMESTAMP NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """))
-            
-            db.execute(text("""
-                CREATE INDEX idx_domain_dns_checks_domain 
-                ON domain_dns_checks(domain_name);
-            """))
-            
-            db.execute(text("""
-                CREATE INDEX idx_domain_dns_checks_checked_at 
-                ON domain_dns_checks(checked_at);
-            """))
-            
-            db.commit()
-            logger.info("✓ domain_dns_checks table created successfully")
-            
-        except Exception as create_error:
-            db.rollback()
-
-            if "duplicate key value violates unique constraint" in str(create_error).lower():
-                logger.warning("Detected PostgreSQL artifact, cleaning up...")
-                
-                try:
-                    # Clean up ALL artifacts
-                    db.execute(text("DROP SEQUENCE IF EXISTS domain_dns_checks_id_seq CASCADE;"))
-                    db.execute(text("DROP TABLE IF EXISTS domain_dns_checks CASCADE;"))
-                    db.execute(text("DROP TYPE IF EXISTS domain_dns_checks CASCADE;"))
-                    db.commit()
-                    logger.info("Cleaned up PostgreSQL artifacts")
-
-                    # Retry
-                    db.execute(text("""
-                        CREATE TABLE domain_dns_checks (
-                            id SERIAL PRIMARY KEY,
-                            domain_name VARCHAR(255) NOT NULL UNIQUE,
-                            spf_check JSONB,
-                            dkim_check JSONB,
-                            dmarc_check JSONB,
-                            checked_at TIMESTAMP NOT NULL,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        );
-                    """))
-                    
-                    db.execute(text("""
-                        CREATE INDEX idx_domain_dns_checks_domain 
-                        ON domain_dns_checks(domain_name);
-                    """))
-                    
-                    db.execute(text("""
-                        CREATE INDEX idx_domain_dns_checks_checked_at 
-                        ON domain_dns_checks(checked_at);
-                    """))
-                    
-                    db.commit()
-                    logger.info("✓ domain_dns_checks table created after cleanup")
-                    
-                except Exception as retry_error:
-                    logger.error(f"Failed after cleanup: {retry_error}")
-                    db.rollback()
-                    raise
-            else:
-                logger.error(f"Failed to create table: {create_error}")
-                raise
-        
-    except Exception as e:
-        logger.error(f"Error ensuring domain_dns_checks table: {e}")
-        db.rollback()
-
-
 def add_is_full_check_column(db: Session):
-    """Add is_full_check column to domain_dns_checks"""
     logger.info("Checking if is_full_check column exists...")
     
     try:
@@ -381,9 +240,6 @@ def add_is_full_check_column(db: Session):
         db.rollback()
 
 def add_postfix_unique_constraint(db: Session):
-    """
-    Add UNIQUE constraint to postfix_logs to prevent duplicate logs
-    """
     logger.info("Adding UNIQUE constraint to postfix_logs...")
     
     try:
@@ -445,227 +301,7 @@ def add_postfix_unique_constraint(db: Session):
             logger.error(f"Error adding UNIQUE index: {e}")
             db.rollback()
 
-def ensure_dmarc_tables(db: Session):
-    """Ensure DMARC tables exist with proper structure"""
-    logger.info("Checking if DMARC tables exist...")
-    
-    try:
-        # Check if dmarc_reports table exists
-        result = db.execute(text("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'dmarc_reports'
-            );
-        """))
-        
-        reports_exists = result.fetchone()[0]
-        
-        # Check if dmarc_records table exists
-        result = db.execute(text("""
-            SELECT EXISTS (
-                SELECT FROM information_schema.tables 
-                WHERE table_schema = 'public' 
-                AND table_name = 'dmarc_records'
-            );
-        """))
-        
-        records_exists = result.fetchone()[0]
-        
-        if reports_exists and records_exists:
-            logger.info("DMARC tables already exist")
-            return
-        
-        # If tables exist partially, clean up
-        if reports_exists or records_exists:
-            logger.warning("DMARC tables exist partially, cleaning up...")
-            try:
-                db.execute(text("DROP TABLE IF EXISTS dmarc_records CASCADE;"))
-                db.execute(text("DROP TABLE IF EXISTS dmarc_reports CASCADE;"))
-                db.execute(text("DROP SEQUENCE IF EXISTS dmarc_reports_id_seq CASCADE;"))
-                db.execute(text("DROP SEQUENCE IF EXISTS dmarc_records_id_seq CASCADE;"))
-                db.commit()
-                logger.info("Cleaned up partial DMARC tables")
-            except Exception as cleanup_error:
-                logger.error(f"Error during cleanup: {cleanup_error}")
-                db.rollback()
-                raise
-        
-        logger.info("Creating DMARC tables...")
-        
-        try:
-            # Create dmarc_reports table
-            db.execute(text("""
-                CREATE TABLE dmarc_reports (
-                    id SERIAL PRIMARY KEY,
-                    report_id VARCHAR(255) NOT NULL UNIQUE,
-                    domain VARCHAR(255) NOT NULL,
-                    org_name VARCHAR(255) NOT NULL,
-                    email VARCHAR(255),
-                    extra_contact_info TEXT,
-                    begin_date INTEGER NOT NULL,
-                    end_date INTEGER NOT NULL,
-                    policy_published JSONB,
-                    domain_id VARCHAR(255),
-                    raw_xml TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """))
-            
-            # Create indexes for dmarc_reports
-            db.execute(text("""
-                CREATE INDEX idx_dmarc_report_domain_date 
-                ON dmarc_reports(domain, begin_date);
-            """))
-            
-            db.execute(text("""
-                CREATE INDEX idx_dmarc_report_org 
-                ON dmarc_reports(org_name);
-            """))
-            
-            db.execute(text("""
-                CREATE INDEX idx_dmarc_report_created 
-                ON dmarc_reports(created_at);
-            """))
-            
-            # Create dmarc_records table
-            db.execute(text("""
-                CREATE TABLE dmarc_records (
-                    id SERIAL PRIMARY KEY,
-                    dmarc_report_id INTEGER NOT NULL,
-                    source_ip VARCHAR(50) NOT NULL,
-                    count INTEGER NOT NULL,
-                    disposition VARCHAR(20),
-                    dkim_result VARCHAR(20),
-                    spf_result VARCHAR(20),
-                    header_from VARCHAR(255),
-                    envelope_from VARCHAR(255),
-                    envelope_to VARCHAR(255),
-                    auth_results JSONB,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            """))
-            
-            # Create indexes for dmarc_records
-            db.execute(text("""
-                CREATE INDEX idx_dmarc_record_report 
-                ON dmarc_records(dmarc_report_id);
-            """))
-            
-            db.execute(text("""
-                CREATE INDEX idx_dmarc_record_ip 
-                ON dmarc_records(source_ip);
-            """))
-            
-            db.execute(text("""
-                CREATE INDEX idx_dmarc_record_results 
-                ON dmarc_records(dkim_result, spf_result);
-            """))
-            
-            db.commit()
-            logger.info("✓ DMARC tables created successfully")
-            
-        except Exception as create_error:
-            db.rollback()
-            
-            # Handle duplicate key errors (PostgreSQL artifacts)
-            if "duplicate key value violates unique constraint" in str(create_error).lower():
-                logger.warning("Detected PostgreSQL artifacts, cleaning up...")
-                
-                try:
-                    # Clean up ALL artifacts
-                    db.execute(text("DROP TABLE IF EXISTS dmarc_records CASCADE;"))
-                    db.execute(text("DROP TABLE IF EXISTS dmarc_reports CASCADE;"))
-                    db.execute(text("DROP SEQUENCE IF EXISTS dmarc_reports_id_seq CASCADE;"))
-                    db.execute(text("DROP SEQUENCE IF EXISTS dmarc_records_id_seq CASCADE;"))
-                    db.commit()
-                    logger.info("Cleaned up PostgreSQL artifacts")
-                    
-                    # Retry - create tables again
-                    db.execute(text("""
-                        CREATE TABLE dmarc_reports (
-                            id SERIAL PRIMARY KEY,
-                            report_id VARCHAR(255) NOT NULL UNIQUE,
-                            domain VARCHAR(255) NOT NULL,
-                            org_name VARCHAR(255) NOT NULL,
-                            email VARCHAR(255),
-                            extra_contact_info TEXT,
-                            begin_date INTEGER NOT NULL,
-                            end_date INTEGER NOT NULL,
-                            policy_published JSONB,
-                            domain_id VARCHAR(255),
-                            raw_xml TEXT,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        );
-                    """))
-                    
-                    db.execute(text("""
-                        CREATE INDEX idx_dmarc_report_domain_date 
-                        ON dmarc_reports(domain, begin_date);
-                    """))
-                    
-                    db.execute(text("""
-                        CREATE INDEX idx_dmarc_report_org 
-                        ON dmarc_reports(org_name);
-                    """))
-                    
-                    db.execute(text("""
-                        CREATE INDEX idx_dmarc_report_created 
-                        ON dmarc_reports(created_at);
-                    """))
-                    
-                    db.execute(text("""
-                        CREATE TABLE dmarc_records (
-                            id SERIAL PRIMARY KEY,
-                            dmarc_report_id INTEGER NOT NULL,
-                            source_ip VARCHAR(50) NOT NULL,
-                            count INTEGER NOT NULL,
-                            disposition VARCHAR(20),
-                            dkim_result VARCHAR(20),
-                            spf_result VARCHAR(20),
-                            header_from VARCHAR(255),
-                            envelope_from VARCHAR(255),
-                            envelope_to VARCHAR(255),
-                            auth_results JSONB,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        );
-                    """))
-                    
-                    db.execute(text("""
-                        CREATE INDEX idx_dmarc_record_report 
-                        ON dmarc_records(dmarc_report_id);
-                    """))
-                    
-                    db.execute(text("""
-                        CREATE INDEX idx_dmarc_record_ip 
-                        ON dmarc_records(source_ip);
-                    """))
-                    
-                    db.execute(text("""
-                        CREATE INDEX idx_dmarc_record_results 
-                        ON dmarc_records(dkim_result, spf_result);
-                    """))
-                    
-                    db.commit()
-                    logger.info("✓ DMARC tables created after cleanup")
-                    
-                except Exception as retry_error:
-                    logger.error(f"Failed after cleanup: {retry_error}")
-                    db.rollback()
-                    raise
-            else:
-                logger.error(f"Failed to create DMARC tables: {create_error}")
-                raise
-        
-    except Exception as e:
-        logger.error(f"Error ensuring DMARC tables: {e}")
-        db.rollback()
-        raise
-
 def add_geoip_fields_to_dmarc(db: Session):
-    """Add GeoIP fields to dmarc_records table"""
     logger.info("Checking if GeoIP fields exist in dmarc_records...")
     
     try:
@@ -704,7 +340,6 @@ def add_geoip_fields_to_dmarc(db: Session):
         db.rollback()
 
 def add_geoip_fields_to_rspamd(db: Session):
-    """Add GeoIP fields to rspamd_logs table"""
     logger.info("Checking if GeoIP fields exist in rspamd_logs...")
     
     try:
@@ -742,7 +377,6 @@ def add_geoip_fields_to_rspamd(db: Session):
         db.rollback()
 
 def add_geoip_fields_to_netfilter(db: Session):
-    """Add GeoIP fields to netfilter_logs table"""
     logger.info("Checking if GeoIP fields exist in netfilter_logs...")
     
     try:
@@ -780,7 +414,6 @@ def add_geoip_fields_to_netfilter(db: Session):
         db.rollback()
 
 def backfill_geoip_netfilter(db: Session):
-    """Backfill GeoIP data for existing netfilter logs that have an IP but no country_code"""
     from .services import geoip_service as _geoip_service
     
     if not _geoip_service.is_geoip_available():
@@ -798,7 +431,6 @@ def backfill_geoip_netfilter(db: Session):
         
         logger.info(f"Backfilling GeoIP data for {count} netfilter logs...")
         
-        # Process in batches
         batch_size = 500
         updated = 0
         rows = db.execute(text("""
@@ -847,14 +479,9 @@ def backfill_geoip_netfilter(db: Session):
         db.rollback()
 
 def create_dmarc_sync_table(db: Session):
-    """
-    Create dmarc_syncs table for tracking IMAP sync operations
-    This table tracks automatic and manual DMARC report imports from IMAP
-    """
     logger.info("Checking if dmarc_syncs table exists...")
     
     try:
-        # Check if table already exists
         result = db.execute(text("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
@@ -870,7 +497,6 @@ def create_dmarc_sync_table(db: Session):
         
         logger.info("Creating dmarc_syncs table...")
         
-        # Create table
         db.execute(text("""
             CREATE TABLE dmarc_syncs (
                 id SERIAL PRIMARY KEY,
@@ -892,7 +518,6 @@ def create_dmarc_sync_table(db: Session):
             );
         """))
         
-        # Create indexes
         db.execute(text("""
             CREATE INDEX idx_dmarc_sync_type_status 
             ON dmarc_syncs(sync_type, status);
@@ -912,9 +537,7 @@ def create_dmarc_sync_table(db: Session):
         raise
 
 def ensure_mailbox_statistics_table(db: Session):
-    """Ensure mailbox_statistics table exists with proper structure"""
     try:
-        # Check if table exists
         result = db.execute(text("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
@@ -947,7 +570,6 @@ def ensure_mailbox_statistics_table(db: Session):
                 )
             """))
             
-            # Create indexes
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_mailbox_domain ON mailbox_statistics(domain)"))
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_mailbox_active ON mailbox_statistics(active)"))
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_mailbox_quota_used ON mailbox_statistics(quota_used)"))
@@ -965,12 +587,6 @@ def ensure_mailbox_statistics_table(db: Session):
 
 
 def widen_monitored_hosts_source(db: Session):
-    """
-    Widen monitored_hosts.source from VARCHAR(50) to TEXT (issue #70).
-    Values like 'relayhost:<long-fqdn>' (e.g. Microsoft 365 EOP relays) exceed
-    50 characters and crashed the Sync Transports & Relayhosts job. TEXT
-    because 'relayhost:' + a max-length DNS name (253) exceeds even 255.
-    """
     try:
         result = db.execute(text("""
             SELECT character_maximum_length
@@ -979,7 +595,6 @@ def widen_monitored_hosts_source(db: Session):
             AND column_name='source'
         """)).fetchone()
 
-        # character_maximum_length is NULL for TEXT - any limit means migrate
         if result and result[0] is not None:
             logger.info(f"Widening monitored_hosts.source from VARCHAR({result[0]}) to TEXT...")
             db.execute(text("""
@@ -994,64 +609,59 @@ def widen_monitored_hosts_source(db: Session):
         db.rollback()
 
 
-def run_migrations():
-    """
-    Run all database migrations and maintenance tasks
-    Called during application startup
-    """
-    logger.info("Running database migrations...")
-    
+def _has_alembic_revision(db: Session) -> bool:
+    if not db.execute(text("SELECT to_regclass('alembic_version') IS NOT NULL")).scalar():
+        return False
+    return bool(db.execute(text("SELECT EXISTS (SELECT 1 FROM alembic_version)")).scalar())
+
+
+def run_netfilter_geoip_backfill():
     db = SessionLocal()
     try:
-        # Ensure Message-ID indexes exist (critical for performance)
+        backfill_geoip_netfilter(db)
+    finally:
+        db.close()
+
+
+def run_migrations():
+    db = SessionLocal()
+    try:
+        if _has_alembic_revision(db):
+            logger.info("The database is on Alembic revisions; the pre-Alembic upgrade steps are not needed")
+            return
+
+        logger.info("Running database migrations...")
         add_message_id_indexes(db)
         
-        # Add is_complete column if missing (for tracking correlation completion)
         add_is_complete_column(db)
         
-        # Domain DNS table
-        ensure_domain_dns_checks_table(db)
         add_is_full_check_column(db)
 
-        # UNIQUE postfix logs
         add_postfix_unique_constraint(db)
 
-        # Clean up duplicate correlations
         removed = cleanup_duplicate_correlations(db)
 
-        # DMARC table
-        ensure_dmarc_tables(db)
         create_dmarc_sync_table(db)
 
-        # GeoIP fields
         add_geoip_fields_to_dmarc(db)
         
-        # Mailbox statistics table
         ensure_mailbox_statistics_table(db)
         
-        # Alias statistics table
         ensure_alias_statistics_table(db)
 
-        # System settings (for cache signaling)
         ensure_system_settings_table(db)
         
-        # Known containers cache
         ensure_known_containers_table(db)
         
-        # Raw service logs (Live Log Viewer)
         ensure_raw_service_logs_table(db)
         
-        # Spam suppressions table
         ensure_spam_suppressions_table(db)
 
-        # Widen monitored_hosts.source (issue #70)
         widen_monitored_hosts_source(db)
 
-        # (add_geoip_fields_to_dmarc already ran above)
         add_geoip_fields_to_rspamd(db)
         add_geoip_fields_to_netfilter(db)
-        backfill_geoip_netfilter(db)
-        
+
         if removed > 0:
             logger.info(f"Migration complete: Cleaned up {removed} duplicate correlations")
         else:
@@ -1065,9 +675,7 @@ def run_migrations():
 
 
 def ensure_alias_statistics_table(db: Session):
-    """Ensure alias_statistics table exists with all required fields"""
     try:
-        # Check if table exists
         result = db.execute(text("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
@@ -1092,7 +700,6 @@ def ensure_alias_statistics_table(db: Session):
                 )
             """))
             
-            # Create indexes
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_alias_domain ON alias_statistics(domain)"))
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_alias_active ON alias_statistics(active)"))
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_alias_primary_mailbox ON alias_statistics(primary_mailbox)"))
@@ -1110,9 +717,7 @@ def ensure_alias_statistics_table(db: Session):
 
 
 def ensure_system_settings_table(db: Session):
-    """Ensure system_settings table exists"""
     try:
-        # Check if table exists
         result = db.execute(text("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
@@ -1143,9 +748,7 @@ def ensure_system_settings_table(db: Session):
 
 
 def ensure_known_containers_table(db: Session):
-    """Ensure known_containers table exists"""
     try:
-        # Check if table exists
         result = db.execute(text("""
             SELECT EXISTS (
                 SELECT FROM information_schema.tables 
@@ -1166,7 +769,6 @@ def ensure_known_containers_table(db: Session):
                 )
             """))
             
-            # Create indexes
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_known_containers_last_seen ON known_containers(last_seen)"))
             
             db.commit()
@@ -1181,7 +783,6 @@ def ensure_known_containers_table(db: Session):
 
 
 def ensure_raw_service_logs_table(db: Session):
-    """Ensure raw_service_logs table exists for the Live Log Viewer"""
     try:
         result = db.execute(text("""
             SELECT EXISTS (
@@ -1205,7 +806,6 @@ def ensure_raw_service_logs_table(db: Session):
                 )
             """))
             
-            # Create indexes
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_raw_log_service_time ON raw_service_logs(service, time DESC)"))
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_raw_log_time ON raw_service_logs(time)"))
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_raw_log_service ON raw_service_logs(service)"))
@@ -1222,7 +822,6 @@ def ensure_raw_service_logs_table(db: Session):
 
 
 def ensure_spam_suppressions_table(db: Session):
-    """Ensure spam_suppressions table exists for the Spam Suppression feature"""
     try:
         result = db.execute(text("""
             SELECT EXISTS (
@@ -1256,7 +855,6 @@ def ensure_spam_suppressions_table(db: Session):
                 )
             """))
             
-            # Create indexes
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_suppression_email ON spam_suppressions(email)"))
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_suppression_type ON spam_suppressions(type)"))
             db.execute(text("CREATE INDEX IF NOT EXISTS idx_suppression_reason ON spam_suppressions(reason)"))
@@ -1275,24 +873,38 @@ def ensure_spam_suppressions_table(db: Session):
         raise
 
 
+def _revisions_unknown_to_this_release(cfg) -> list:
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+    from .database import engine
+
+    known = {script.revision for script in ScriptDirectory.from_config(cfg).walk_revisions()}
+    with engine.connect() as conn:
+        current = MigrationContext.configure(conn).get_current_heads()
+    return [revision for revision in current if revision not in known]
+
+
 def run_alembic_upgrade():
-    """
-    Bring the schema to the latest Alembic revision (the forward migration
-    path from v2.6.4 on). Runs after the frozen legacy migrations above.
-    """
     from alembic import command
     from alembic.config import Config as AlembicConfig
 
-    # backend/alembic.ini locally, /app/alembic.ini in the container
     ini_path = Path(__file__).resolve().parent.parent / "alembic.ini"
     if not ini_path.exists():
         raise FileNotFoundError(f"alembic.ini not found at {ini_path}")
 
     cfg = AlembicConfig(str(ini_path))
     cfg.set_main_option("script_location", str(ini_path.parent / "alembic"))
-    # ConfigParser treats % as interpolation - escape it (passwords may contain %)
     from .config import settings
+    # without %% a database password containing % breaks ConfigParser interpolation
     cfg.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+
+    unknown = _revisions_unknown_to_this_release(cfg)
+    if unknown:
+        logger.warning(
+            f"The database is at revision {', '.join(unknown)}, which this release does not know: a newer release "
+            "already migrated it. Starting without migrating."
+        )
+        return
 
     command.upgrade(cfg, "head")
     logger.info("Alembic schema is up to date")

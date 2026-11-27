@@ -1,15 +1,7 @@
-// =============================================================================
-// NOTIFICATION CHANNELS - Settings > Notifications
-// =============================================================================
-// Manage where alerts are delivered. Multiple destinations can be configured;
-// each type only asks for the fields it actually needs (a Slack channel asks
-// for its webhook URL, Telegram for a bot token and chat ID, and so on).
-// =============================================================================
-
 let notificationChannels = [];
 let notificationChannelTypes = [];
-let notificationAlertTypes = [];  // the alert topics a channel can subscribe to
-let notificationEditing = null;   // channel being edited, or {} for a new one
+let notificationAlertTypes = [];
+let notificationEditing = null;
 
 const CHANNEL_ICONS = {
     slack: 'M14.5 10c-.83 0-1.5-.67-1.5-1.5v-5c0-.83.67-1.5 1.5-1.5s1.5.67 1.5 1.5v5c0 .83-.67 1.5-1.5 1.5z',
@@ -28,7 +20,8 @@ async function loadNotificationChannels() {
             authenticatedFetch('/api/notifications/types'),
             authenticatedFetch('/api/notifications/channels')
         ]);
-        if (!typesRes.ok || !channelsRes.ok) throw new Error('HTTP error');
+        if (!typesRes.ok) throw await responseError(typesRes);
+        if (!channelsRes.ok) throw await responseError(channelsRes);
         const typesPayload = await typesRes.json();
         notificationChannelTypes = typesPayload.types || [];
         notificationAlertTypes = typesPayload.alert_types || [];
@@ -36,7 +29,7 @@ async function loadNotificationChannels() {
         renderNotificationChannels();
     } catch (e) {
         console.error('Notification channels error:', e);
-        panel.innerHTML = '<p class="text-sm text-red-600 dark:text-red-400">Could not load notification destinations.</p>';
+        panel.innerHTML = `<p class="ui-empty ui-text-fail">Could not load destinations: ${escapeHtml(uiErrorText(e))}${uiRetryButton('loadNotificationChannels()')}</p>`;
     }
 }
 
@@ -45,7 +38,6 @@ function _channelTypeLabel(typeId) {
     return t ? t.label : typeId;
 }
 
-/** Which alert topics this channel receives, for the channel list. */
 function _channelTopicsLabel(channel) {
     const selected = channel.alert_types || [];
     if (!selected.length || selected.length === notificationAlertTypes.length) {
@@ -62,48 +54,35 @@ function renderNotificationChannels() {
     const panel = document.getElementById('notification-channels-panel');
     if (!panel) return;
 
-    const cards = notificationChannels.map(ch => {
+    const rows = notificationChannels.map(ch => {
         const statusDot = ch.last_status === 'success'
-            ? '<span class="w-2 h-2 rounded-full bg-green-500" title="Last delivery succeeded"></span>'
+            ? '<i class="ui-mdot ui-mdot-ok" title="Last delivery succeeded" role="img" aria-label="Last delivery succeeded"></i>'
             : ch.last_status === 'failed'
-                ? '<span class="w-2 h-2 rounded-full bg-red-500" title="Last delivery failed"></span>'
-                : '<span class="w-2 h-2 rounded-full bg-gray-300 dark:bg-gray-600" title="Not used yet"></span>';
+                ? '<i class="ui-mdot ui-mdot-fail" title="Last delivery failed" role="img" aria-label="Last delivery failed"></i>'
+                : '<i class="ui-mdot" title="Not used yet" role="img" aria-label="Not used yet"></i>';
         const icon = CHANNEL_ICONS[ch.channel_type] || CHANNEL_ICONS.webhook;
         return `
-        <div class="flex items-center gap-3 p-3 rounded-lg border ${ch.enabled ? 'border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800' : 'border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800/40 opacity-70'}">
-            <svg class="w-5 h-5 flex-shrink-0 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${icon}"></path></svg>
-            <div class="min-w-0 flex-1">
-                <div class="flex items-center gap-2 flex-wrap">
-                    ${statusDot}
-                    <span class="text-sm font-medium text-gray-900 dark:text-white truncate">${escapeHtml(ch.name)}</span>
-                    <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-300">${escapeHtml(_channelTypeLabel(ch.channel_type))}</span>
-                    ${ch.enabled ? '' : '<span class="text-xs text-gray-500 dark:text-gray-400">disabled</span>'}
-                </div>
-                <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">${_channelTopicsLabel(ch)}</p>
-                ${ch.last_error ? `<p class="text-xs text-red-600 dark:text-red-400 mt-0.5 truncate" title="${escapeHtml(ch.last_error)}">${escapeHtml(ch.last_error)}</p>` : ''}
+        <div class="ui-channel${ch.enabled ? '' : ' is-off'}">
+            <svg class="ui-channel-icon" width="20" height="20" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="${icon}"></path></svg>
+            <div class="ui-q-who">
+                <div>${statusDot} <b>${escapeHtml(ch.name)}</b> ${uiTag(_channelTypeLabel(ch.channel_type), '')} ${ch.enabled ? '' : '<span class="ui-muted">disabled</span>'}</div>
+                <small>${_channelTopicsLabel(ch)}</small>
+                ${ch.last_error ? `<small class="ui-text-fail" title="${escapeHtml(ch.last_error)}">${escapeHtml(ch.last_error)}</small>` : ''}
             </div>
-            <div class="flex items-center gap-1 flex-shrink-0">
-                <button type="button" onclick="testNotificationChannel(${ch.id})" class="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Test</button>
-                <button type="button" onclick="editNotificationChannel(${ch.id})" class="px-2 py-1 text-xs rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Edit</button>
-                <button type="button" onclick="deleteNotificationChannel(${ch.id})" class="px-2 py-1 text-xs rounded text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20">Delete</button>
+            <div class="ui-row-actions">
+                <button type="button" onclick="testNotificationChannel(${Number(ch.id)})" class="ui-btn ui-btn-sm">Send test</button>
+                <button type="button" onclick="editNotificationChannel(${Number(ch.id)})" class="ui-btn ui-btn-sm">Edit</button>
+                <button type="button" onclick="deleteNotificationChannel(${Number(ch.id)})" class="ui-btn ui-btn-sm ui-btn-danger">Delete</button>
             </div>
         </div>`;
     }).join('');
 
     panel.innerHTML = `
-        <div class="p-4 bg-gray-50 dark:bg-gray-700/30 rounded-lg">
-            <div class="flex items-center justify-between gap-3 mb-3 flex-wrap">
-                <div>
-                    <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300">Alert destinations</h4>
-                    <p class="text-xs text-gray-500 dark:text-gray-400">Each destination receives the alert types you pick for it, in addition to email.</p>
-                </div>
-                <button type="button" onclick="editNotificationChannel(null)" class="px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white rounded text-xs font-medium flex items-center gap-1.5">
-                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
-                    Add destination
-                </button>
-            </div>
-            <div class="space-y-2">${cards || '<p class="text-sm text-gray-500 dark:text-gray-400 py-2">No destinations yet. Alerts are sent by email only.</p>'}</div>
-        </div>`;
+        <div class="ui-list-head">
+            <h4 class="ui-md-h">Alert destinations</h4>
+            <button type="button" onclick="editNotificationChannel(null)" class="ui-btn ui-btn-sm ui-btn-primary ui-head-actions">+ Add destination</button>
+        </div>
+        <div class="ui-channels">${rows || '<p class="ui-empty">No destinations added yet.</p>'}</div>`;
 }
 
 function editNotificationChannel(channelId) {
@@ -121,32 +100,26 @@ function _renderChannelFields() {
     const cfg = notificationEditing.config || {};
     const fields = type.fields.map(f => {
         const value = cfg[f.key] !== undefined ? cfg[f.key] : (f.default || '');
+        const hintId = `nc-field-${escapeHtml(f.key)}-hint`;
         return `
-            <div>
-                <label for="nc-field-${escapeHtml(f.key)}" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                    ${escapeHtml(f.label)}${f.required ? ' <span class="text-red-500">*</span>' : ' <span class="text-xs font-normal text-gray-400">(optional)</span>'}
-                </label>
-                <input type="text" id="nc-field-${escapeHtml(f.key)}" data-field="${escapeHtml(f.key)}"
-                    value="${escapeHtml(value)}" placeholder="${escapeHtml(f.placeholder || '')}"
-                    class="nc-config-field w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm">
-            </div>`;
+            <label for="nc-field-${escapeHtml(f.key)}">
+                <span class="ui-label">${escapeHtml(f.label)}${f.required ? ' <span class="ui-text-fail">*</span>' : ' <small class="ui-muted">(optional)</small>'}</span>
+                <input type="text" id="nc-field-${escapeHtml(f.key)}" data-field="${escapeHtml(f.key)}"${f.hint ? ` aria-describedby="${hintId}"` : ''}
+                    value="${escapeHtml(value)}" placeholder="${escapeHtml(f.placeholder || '')}" class="nc-config-field ui-input">
+                ${f.hint ? `<small class="ui-muted" id="${hintId}">${escapeHtml(f.hint)}</small>` : ''}
+            </label>`;
     }).join('');
-    return `<p class="text-xs text-gray-500 dark:text-gray-400">${escapeHtml(type.help)}</p>${fields}`;
+    return `<p class="ui-set-desc">${escapeHtml(type.help)}</p>${fields}`;
 }
 
 function _renderAlertTypeChoices() {
-    // No stored selection means "everything", so show all ticked
     const selected = notificationEditing.alert_types && notificationEditing.alert_types.length
         ? notificationEditing.alert_types
         : notificationAlertTypes.map(t => t.id);
     return notificationAlertTypes.map(t => `
-        <label class="flex items-start gap-2 cursor-pointer">
-            <input type="checkbox" class="nc-alert-type mt-0.5 rounded border-gray-300 dark:border-gray-600"
-                value="${escapeHtml(t.id)}" ${selected.indexOf(t.id) !== -1 ? 'checked' : ''}>
-            <span>
-                <span class="text-sm text-gray-800 dark:text-gray-200">${escapeHtml(t.label)}</span>
-                <span class="block text-xs text-gray-500 dark:text-gray-400">${escapeHtml(t.description)}</span>
-            </span>
+        <label class="ui-check-label ui-check-top">
+            <input type="checkbox" class="nc-alert-type ui-check" value="${escapeHtml(t.id)}" ${selected.indexOf(t.id) !== -1 ? 'checked' : ''}>
+            <span><b>${escapeHtml(t.label)}</b><small class="ui-muted">${escapeHtml(t.description)}</small></span>
         </label>`).join('');
 }
 
@@ -157,56 +130,41 @@ function renderNotificationChannelModal() {
         `<option value="${escapeHtml(t.id)}" ${t.id === notificationEditing.channel_type ? 'selected' : ''}>${escapeHtml(t.label)}</option>`
     ).join('');
 
-    const modal = document.createElement('div');
-    modal.id = 'notification-channel-modal';
-    modal.className = 'fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4';
-    modal.innerHTML = `
-        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
-            <div class="px-5 py-4 border-b border-gray-200 dark:border-gray-700 flex items-center justify-between">
-                <h3 class="text-lg font-semibold text-gray-900 dark:text-white">${isNew ? 'Add destination' : 'Edit destination'}</h3>
-                <button type="button" onclick="closeNotificationChannelModal()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 text-xl leading-none">&times;</button>
-            </div>
-            <form id="nc-form" onsubmit="saveNotificationChannel(event)" class="p-5 space-y-4">
-                <div>
-                    <label for="nc-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name <span class="text-red-500">*</span></label>
-                    <input type="text" id="nc-name" required value="${escapeHtml(notificationEditing.name || '')}" placeholder="e.g. Ops Slack"
-                        class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm">
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">Only used to identify this destination in the list.</p>
-                </div>
-                <div>
-                    <label for="nc-type" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Service</label>
-                    <select id="nc-type" onchange="changeNotificationChannelType(this.value)"
-                        class="w-full rounded border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 text-gray-900 dark:text-white px-3 py-2 text-sm">${typeOptions}</select>
-                </div>
-                <div id="nc-fields" class="space-y-3">${_renderChannelFields()}</div>
-
-                <div class="border-t border-gray-200 dark:border-gray-700 pt-4">
-                    <p class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Which alerts to send here</p>
-                    <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">Leave all ticked to receive everything.</p>
-                    <div class="space-y-2">${_renderAlertTypeChoices()}</div>
-                </div>
-
-                <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
-                    <input type="checkbox" id="nc-enabled" ${notificationEditing.enabled !== false ? 'checked' : ''} class="rounded border-gray-300 dark:border-gray-600">
-                    Enabled
+    const { backdrop: modal } = uiDialog({
+        id: 'notification-channel-modal', title: isNew ? 'Add destination' : 'Edit destination', size: 'sm',
+        close: closeNotificationChannelModal, bodyClass: 'ui-form',
+        form: { id: 'nc-form', onsubmit: `saveNotificationChannelOnce(event)` },
+        body: `
+                <label for="nc-name"><span class="ui-label">Name <span class="ui-text-fail">*</span></span>
+                    <input type="text" id="nc-name" required value="${escapeHtml(notificationEditing.name || '')}" placeholder="Operations Slack" class="ui-input">
                 </label>
-                <div class="flex justify-between items-center gap-2 pt-2">
-                    <button type="button" onclick="testNotificationChannelDraft()" class="px-3 py-2 text-sm rounded border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Send test</button>
-                    <div class="flex gap-2">
-                        <button type="button" onclick="closeNotificationChannelModal()" class="px-3 py-2 text-sm rounded text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700">Cancel</button>
-                        <button type="submit" class="px-4 py-2 text-sm rounded bg-blue-600 hover:bg-blue-700 text-white font-medium">Save</button>
-                    </div>
+                <label for="nc-type"><span class="ui-label">Service</span>
+                    <select id="nc-type" onchange="changeNotificationChannelType(this.value)" class="ui-select">${typeOptions}</select>
+                </label>
+                <div id="nc-fields" class="ui-form">${_renderChannelFields()}</div>
+
+                <div class="ui-form ui-form-split">
+                    <div><span class="ui-label">Alert types</span><p class="ui-set-desc">Selecting none also sends all alert types.</p></div>
+                    ${_renderAlertTypeChoices()}
                 </div>
-            </form>
-        </div>`;
-    document.body.appendChild(modal);
+
+                <label class="ui-check-label">
+                    <input type="checkbox" id="nc-enabled" ${notificationEditing.enabled !== false ? 'checked' : ''} class="ui-check">
+                    Enabled
+                </label>`,
+        foot: `<button type="button" onclick="testNotificationChannelDraft()" class="ui-btn">Send test</button>
+            <span class="ui-toolbar-gap"></span>
+            <button type="button" onclick="closeNotificationChannelModal()" class="ui-btn">Cancel</button>
+            <button type="submit" form="nc-form" class="ui-btn ui-btn-primary">Save</button>`,
+    });
+    uiGuardDialog(modal);
     document.getElementById('nc-name')?.focus();
 }
 
 function changeNotificationChannelType(newType) {
     _collectChannelForm();
     notificationEditing.channel_type = newType;
-    notificationEditing.config = {};   // different service, different fields
+    notificationEditing.config = {};
     const fields = document.getElementById('nc-fields');
     if (fields) fields.innerHTML = _renderChannelFields();
 }
@@ -225,11 +183,22 @@ function _collectChannelForm() {
     return notificationEditing;
 }
 
-function closeNotificationChannelModal() {
-    document.getElementById('notification-channel-modal')?.remove();
-    notificationEditing = null;
+function closeNotificationChannelModal(saved = false) {
+    const modal = document.getElementById('notification-channel-modal');
+    const close = () => {
+        modal?.remove();
+        notificationEditing = null;
+    };
+    if (saved || !modal) {
+        uiDialogSaved(modal);
+        close();
+    } else uiCloseGuarded(modal, close);
 }
 
+function saveNotificationChannelOnce(event) {
+    event.preventDefault();
+    return uiOnce(event.submitter || 'notification-channel', () => saveNotificationChannel(event), event.submitter, 'Saving...');
+}
 async function saveNotificationChannel(event) {
     event.preventDefault();
     const data = _collectChannelForm();
@@ -250,14 +219,14 @@ async function saveNotificationChannel(event) {
             });
         if (!response.ok) {
             const detail = await response.json().catch(() => ({}));
-            showToast(detail.detail || 'Could not save destination', 'error');
+            showToast(`Could not save the destination: ${uiHttpErrorText(response.status, detail)}`, 'error');
             return;
         }
         showToast(isNew ? 'Destination added' : 'Destination updated', 'success');
-        closeNotificationChannelModal();
+        closeNotificationChannelModal(true);
         loadNotificationChannels();
     } catch (e) {
-        showToast('Could not save destination', 'error');
+        showToast(`Could not save the destination: ${uiErrorText(e)}`, 'error');
     }
 }
 
@@ -265,45 +234,47 @@ async function deleteNotificationChannel(channelId) {
     const channel = notificationChannels.find(c => c.id === channelId);
     const confirmed = await showConfirmModal({
         title: 'Delete destination',
-        message: `Delete "${channel ? channel.name : 'this destination'}"? Alerts will no longer be sent there.`,
+        message: `Delete "${channel ? channel.name : 'this destination'}"? Alerts will no longer be sent there. This cannot be undone.`,
         confirmText: 'Delete',
         isDangerous: true
     });
     if (!confirmed) return;
     try {
         const response = await authenticatedFetch(`/api/notifications/channels/${channelId}`, { method: 'DELETE' });
-        if (!response.ok) { showToast('Could not delete destination', 'error'); return; }
+        if (!response.ok) throw await responseError(response);
         showToast('Destination deleted', 'success');
         loadNotificationChannels();
     } catch (e) {
-        showToast('Could not delete destination', 'error');
+        showToast(`Could not delete the destination: ${uiErrorText(e)}`, 'error');
     }
 }
 
 async function testNotificationChannel(channelId) {
-    showConnectionTestModal('Notification Test', 'Sending test notification...');
+    const run = showConnectionTestModal('Notification test', 'Sending test notification...');
     try {
         const response = await authenticatedFetch(`/api/notifications/channels/${channelId}/test`, { method: 'POST' });
+        if (!response.ok) throw await responseError(response);
         const result = await response.json();
-        updateConnectionTestModal(result.success ? 'success' : 'error', result.logs || ['No logs available']);
+        updateConnectionTestModal(result.success ? 'success' : 'error', result.logs || ['No logs available'], run);
         loadNotificationChannels();
     } catch (e) {
-        updateConnectionTestModal('error', ['Failed to send test notification', `Error: ${e.message}`]);
+        updateConnectionTestModal('error', ['Could not send the test notification. Check the destination settings and try again.', `Error: ${uiErrorText(e)}`], run);
     }
 }
 
 async function testNotificationChannelDraft() {
     const data = _collectChannelForm();
-    showConnectionTestModal('Notification Test', 'Sending test notification...');
+    const run = showConnectionTestModal('Notification test', 'Sending test notification...');
     try {
         const response = await authenticatedFetch('/api/notifications/test', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ channel_type: data.channel_type, config: data.config })
         });
+        if (!response.ok) throw await responseError(response);
         const result = await response.json();
-        updateConnectionTestModal(result.success ? 'success' : 'error', result.logs || ['No logs available']);
+        updateConnectionTestModal(result.success ? 'success' : 'error', result.logs || ['No logs available'], run);
     } catch (e) {
-        updateConnectionTestModal('error', ['Failed to send test notification', `Error: ${e.message}`]);
+        updateConnectionTestModal('error', ['Could not send the test notification. Check the destination settings and try again.', `Error: ${uiErrorText(e)}`], run);
     }
 }

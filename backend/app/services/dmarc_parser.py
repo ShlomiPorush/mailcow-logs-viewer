@@ -1,7 +1,3 @@
-"""
-DMARC Report Parser
-Handles parsing of DMARC aggregate reports in XML format (GZ or ZIP compressed)
-"""
 import ipaddress
 import re
 import zipfile
@@ -17,16 +13,23 @@ from .safe_decompress import (
     gzip_decompress_limited,
     zip_read_limited,
 )
+from .report_identity import (
+    MAX_REPORT_ITEMS,
+    MAX_STORED_COUNT,
+    REPORT_TOO_LARGE,
+    ReportLimitError,
+    ReportRejectedError,
+    dmarc_record_key,
+    zip_report_member,
+)
 
 logger = logging.getLogger(__name__)
 
-# A DNS name: dot-separated labels of letters, digits and inner hyphens
 _DOMAIN_NAME = re.compile(r"^(?=.{1,253}$)(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*"
                           r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.?$")
 
 
 def is_valid_ip(value) -> bool:
-    """True for a plain IPv4 or IPv6 address."""
     try:
         ipaddress.ip_address(value)
         return True
@@ -35,44 +38,30 @@ def is_valid_ip(value) -> bool:
 
 
 def is_valid_domain_name(value) -> bool:
-    """True for a plain DNS domain name. Reports arrive from outside, so a
-    domain field that is anything else is rejected, not stored."""
     return isinstance(value, str) and bool(_DOMAIN_NAME.match(value))
 
 
 def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, Any]]:
-    """
-    Parse DMARC report from compressed file (GZ or ZIP)
-    
-    Args:
-        file_content: Raw bytes of the compressed file
-        filename: Original filename (to determine compression type)
-        
-    Returns:
-        Parsed DMARC data or None if parsing failed
-    """
     try:
         if len(file_content) > MAX_COMPRESSED_BYTES:
             logger.error(f"DMARC file {filename} exceeds compressed size limit, rejecting")
-            return None
+            raise ReportLimitError(REPORT_TOO_LARGE)
 
-        # Determine file type and extract XML
         xml_content = None
 
-        if filename.endswith('.gz'):
-            # Gzip compressed
+        if file_content[:2] == b'\x1f\x8b':
             xml_content = gzip_decompress_limited(file_content, source=filename)
 
-        elif filename.endswith('.zip'):
-            # ZIP compressed (Google uses this)
+        elif file_content[:4] == b'PK\x03\x04':
             with zipfile.ZipFile(BytesIO(file_content)) as z:
-                # Get first XML file in zip
-                xml_files = [name for name in z.namelist() if name.endswith('.xml')]
-                if xml_files:
-                    xml_content = zip_read_limited(z, xml_files[0], source=filename)
+                xml_file = zip_report_member(z, '.xml')
+                if xml_file:
+                    xml_content = zip_read_limited(z, xml_file, source=filename)
                 else:
                     logger.error(f"No XML file found in ZIP: {filename}")
                     return None
+        elif file_content.lstrip(b'\xef\xbb\xbf \t\r\n')[:1] == b'<':
+            xml_content = file_content
         else:
             logger.error(f"Unsupported file format: {filename}")
             return None
@@ -81,29 +70,19 @@ def parse_dmarc_file(file_content: bytes, filename: str) -> Optional[Dict[str, A
             logger.error(f"Failed to extract XML content from {filename}")
             return None
         
-        # Parse XML
-        return parse_dmarc_xml(xml_content.decode('utf-8'), xml_content.decode('utf-8'))
+        return parse_dmarc_xml(xml_content.decode('utf-8-sig'))
 
     except DecompressionLimitError as e:
         logger.error(f"Rejected oversized DMARC file {filename}: {e}")
-        return None
+        raise ReportLimitError(REPORT_TOO_LARGE) from e
+    except ReportRejectedError:
+        raise
     except Exception as e:
         logger.error(f"Error parsing DMARC file {filename}: {e}")
         return None
 
 
 def find_element(parent: ET.Element, tag: str, namespaces: List[str]) -> Optional[ET.Element]:
-    """
-    Find an element trying multiple namespaces
-    
-    Args:
-        parent: Parent XML element
-        tag: Tag name to find
-        namespaces: List of namespace prefixes to try (empty string for no namespace)
-        
-    Returns:
-        Found element or None
-    """
     for ns in namespaces:
         if ns:
             elem = parent.find(f'{{{ns}}}{tag}')
@@ -115,17 +94,6 @@ def find_element(parent: ET.Element, tag: str, namespaces: List[str]) -> Optiona
 
 
 def find_all_elements(parent: ET.Element, tag: str, namespaces: List[str]) -> List[ET.Element]:
-    """
-    Find all elements matching tag, trying multiple namespaces
-    
-    Args:
-        parent: Parent XML element
-        tag: Tag name to find
-        namespaces: List of namespace prefixes to try
-        
-    Returns:
-        List of found elements
-    """
     for ns in namespaces:
         if ns:
             elems = parent.findall(f'{{{ns}}}{tag}')
@@ -136,29 +104,16 @@ def find_all_elements(parent: ET.Element, tag: str, namespaces: List[str]) -> Li
     return []
 
 
-# Known DMARC XML namespaces
 DMARC_NAMESPACES = [
-    '',  # No namespace (DMARC 1.0)
-    'urn:ietf:params:xml:ns:dmarc-2.0',  # DMARC 2.0
+    '',
+    'urn:ietf:params:xml:ns:dmarc-2.0',
 ]
 
 
-def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
-    """
-    Parse DMARC XML content
-    
-    Args:
-        xml_string: XML content as string
-        raw_xml: Original raw XML for storage
-        
-    Returns:
-        Dictionary with parsed DMARC data
-    """
+def parse_dmarc_xml(xml_string: str) -> Dict[str, Any]:
     try:
-        # defusedxml blocks entity-expansion attacks (billion laughs / quadratic blowup)
         root = DET.fromstring(xml_string)
         
-        # Parse report metadata (try with and without namespace)
         metadata = find_element(root, 'report_metadata', DMARC_NAMESPACES)
         if metadata is None:
             raise ValueError("Missing report_metadata element")
@@ -179,7 +134,6 @@ def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
         begin_date = int(get_element_text(date_range, 'begin', DMARC_NAMESPACES))
         end_date = int(get_element_text(date_range, 'end', DMARC_NAMESPACES))
         
-        # Parse published policy
         policy = find_element(root, 'policy_published', DMARC_NAMESPACES)
         if policy is None:
             raise ValueError("Missing policy_published element")
@@ -198,16 +152,24 @@ def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
             'np': get_element_text(policy, 'np', DMARC_NAMESPACES),
         }
         
-        # Remove None values
         policy_published = {k: v for k, v in policy_published.items() if v is not None}
         
-        # Parse records
-        records = []
+        merged = {}
         for record_elem in find_all_elements(root, 'record', DMARC_NAMESPACES):
             record_data = parse_dmarc_record(record_elem)
-            if record_data:
-                records.append(record_data)
-        
+            if not record_data:
+                continue
+            key = dmarc_record_key(record_data)
+            if key in merged:
+                merged[key]['count'] += record_data['count']
+            elif len(merged) >= MAX_REPORT_ITEMS:
+                raise ReportLimitError(f"The report has more than {MAX_REPORT_ITEMS:,} records.")
+            else:
+                merged[key] = record_data
+            if not 0 <= merged[key]['count'] <= MAX_STORED_COUNT:
+                raise ValueError("A record count is out of range")
+        records = list(merged.values())
+
         return {
             'report_id': report_id,
             'org_name': org_name,
@@ -218,7 +180,6 @@ def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
             'end_date': end_date,
             'policy_published': policy_published,
             'records': records,
-            'raw_xml': raw_xml
         }
         
     except Exception as e:
@@ -227,46 +188,30 @@ def parse_dmarc_xml(xml_string: str, raw_xml: str) -> Dict[str, Any]:
 
 
 def parse_dmarc_record(record_elem: ET.Element) -> Optional[Dict[str, Any]]:
-    """
-    Parse a single DMARC record element
-    
-    Args:
-        record_elem: XML element for a record
-        
-    Returns:
-        Dictionary with parsed record data
-    """
     try:
         row = find_element(record_elem, 'row', DMARC_NAMESPACES)
         if row is None:
             return None
         
-        # Source and count
         source_ip = get_element_text(row, 'source_ip', DMARC_NAMESPACES)
-        # Some reporters send placeholder rows with no source IP; there is
-        # nothing to attribute them to, so they are skipped, not stored
         if not is_valid_ip(source_ip):
             return None
         count = int(get_element_text(row, 'count', DMARC_NAMESPACES, '0'))
         
-        # Policy evaluation
         policy_eval = find_element(row, 'policy_evaluated', DMARC_NAMESPACES)
         disposition = get_element_text(policy_eval, 'disposition', DMARC_NAMESPACES) if policy_eval else None
         dkim_result = get_element_text(policy_eval, 'dkim', DMARC_NAMESPACES) if policy_eval else None
         spf_result = get_element_text(policy_eval, 'spf', DMARC_NAMESPACES) if policy_eval else None
         
-        # Identifiers
         identifiers = find_element(record_elem, 'identifiers', DMARC_NAMESPACES)
         header_from = get_element_text(identifiers, 'header_from', DMARC_NAMESPACES) if identifiers else None
         envelope_from = get_element_text(identifiers, 'envelope_from', DMARC_NAMESPACES) if identifiers else None
         envelope_to = get_element_text(identifiers, 'envelope_to', DMARC_NAMESPACES) if identifiers else None
         
-        # Auth results
         auth_results = {}
         auth_results_elem = find_element(record_elem, 'auth_results', DMARC_NAMESPACES)
         
         if auth_results_elem:
-            # Parse DKIM results
             dkim_results = []
             for dkim_elem in find_all_elements(auth_results_elem, 'dkim', DMARC_NAMESPACES):
                 dkim_data = {
@@ -279,7 +224,6 @@ def parse_dmarc_record(record_elem: ET.Element) -> Optional[Dict[str, Any]]:
             if dkim_results:
                 auth_results['dkim'] = dkim_results
             
-            # Parse SPF results
             spf_results = []
             for spf_elem in find_all_elements(auth_results_elem, 'spf', DMARC_NAMESPACES):
                 spf_data = {
@@ -310,18 +254,6 @@ def parse_dmarc_record(record_elem: ET.Element) -> Optional[Dict[str, Any]]:
 
 
 def get_element_text(parent: Optional[ET.Element], tag: str, namespaces: List[str] = None, default: Optional[str] = None) -> Optional[str]:
-    """
-    Safely get text from XML element with namespace support
-    
-    Args:
-        parent: Parent XML element
-        tag: Tag name to find
-        namespaces: List of namespace prefixes to try
-        default: Default value if not found
-        
-    Returns:
-        Element text or default value
-    """
     if parent is None:
         return default
     

@@ -1,4 +1,3 @@
-"""Dovecot correlation owns its database session in a worker."""
 import asyncio
 import threading
 from contextlib import contextmanager
@@ -6,6 +5,7 @@ from unittest.mock import Mock
 
 
 from app import scheduler
+from app.services import job_status as job_status_store
 
 
 def test_dovecot_leaves_event_loop_responsive(monkeypatch):
@@ -29,7 +29,8 @@ def test_dovecot_leaves_event_loop_responsive(monkeypatch):
             threads.append(threading.get_ident())
             finished.set()
     monkeypatch.setattr(scheduler, "get_db_context", session)
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(job_status_store, "job_status", {})
+    monkeypatch.setattr(scheduler, "job_status", job_status_store.job_status)
     async def run():
         loop_thread = threading.get_ident()
         task = asyncio.create_task(scheduler.correlate_dovecot_logs())
@@ -52,7 +53,8 @@ def test_dovecot_reports_database_failure(monkeypatch):
         raise RuntimeError("fixture database failure")
         yield
     monkeypatch.setattr(scheduler, "get_db_context", session)
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(job_status_store, "job_status", {})
+    monkeypatch.setattr(scheduler, "job_status", job_status_store.job_status)
     asyncio.run(scheduler.correlate_dovecot_logs())
     assert scheduler.job_status["correlate_dovecot"]["status"] == "failed"
     assert scheduler.job_status["correlate_dovecot"]["error"] == "fixture database failure"
@@ -101,7 +103,8 @@ def test_disabled_dovecot_does_not_access_database(monkeypatch):
     monkeypatch.setattr(scheduler, "dovecot_correlation_available", lambda: False)
     session = Mock(side_effect=AssertionError("disabled job accessed database"))
     monkeypatch.setattr(scheduler, "get_db_context", session)
-    monkeypatch.setattr(scheduler, "job_status", {})
+    monkeypatch.setattr(job_status_store, "job_status", {})
+    monkeypatch.setattr(scheduler, "job_status", job_status_store.job_status)
     asyncio.run(scheduler.correlate_dovecot_logs())
     session.assert_not_called()
     assert scheduler.job_status["correlate_dovecot"]["status"] == "success"

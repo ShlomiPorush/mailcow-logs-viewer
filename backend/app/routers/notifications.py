@@ -1,10 +1,3 @@
-"""
-Notification channels API - manage where alerts are delivered.
-
-Multiple channels can be configured (Slack, Telegram, ntfy, ...); every alert
-goes to all enabled ones. Secrets are masked in responses and preserved when
-the UI sends the mask back unchanged.
-"""
 import asyncio
 import logging
 from datetime import datetime
@@ -18,6 +11,8 @@ from ..database import get_db
 from ..models import NotificationChannel
 from ..services import notification_channels as nc
 from ..utils import internal_error, format_datetime_for_api
+from ..api_models import Invalid, documented
+from ..api_models import notifications as m
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +23,7 @@ class ChannelRequest(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     channel_type: str
     config: Dict = Field(default_factory=dict)
-    alert_types: Optional[List[str]] = None   # None/empty = every alert
+    alert_types: Optional[List[str]] = None
     enabled: bool = True
 
 
@@ -39,14 +34,12 @@ class ChannelTestRequest(BaseModel):
 
 
 def _clean_alert_types(alert_types: Optional[List[str]]) -> Optional[List[str]]:
-    """Keep only known topic ids. Empty means "every alert" (stored as NULL)."""
     if not alert_types:
         return None
     cleaned = [t for t in alert_types if t in nc.ALERT_TYPE_IDS]
     unknown = set(alert_types) - nc.ALERT_TYPE_IDS
     if unknown:
         raise HTTPException(status_code=422, detail=f"Unknown alert type(s): {', '.join(sorted(unknown))}")
-    # Subscribing to everything is the same as no filter
     return None if len(cleaned) == len(nc.ALERT_TYPE_IDS) else cleaned
 
 
@@ -64,7 +57,7 @@ def _serialize(c: NotificationChannel) -> Dict:
     }
 
 
-@router.get("/types")
+@router.get("/types", responses=documented(m.NotificationTypes))
 def get_channel_types():
     """Field specs per channel type - drives the settings UI."""
     return {
@@ -76,7 +69,7 @@ def get_channel_types():
     }
 
 
-@router.get("/channels")
+@router.get("/channels", responses=documented(m.NotificationChannels, errors={500: None}))
 def list_channels(db: Session = Depends(get_db)):
     """All configured channels (secrets masked)."""
     try:
@@ -87,13 +80,12 @@ def list_channels(db: Session = Depends(get_db)):
         raise internal_error(e)
 
 
-@router.post("/channels")
+@router.post("/channels", responses=documented(m.NotificationChannel, errors={422: Invalid, 500: None}))
 def create_channel(request: ChannelRequest, db: Session = Depends(get_db)):
     """Add a channel."""
     if request.channel_type not in nc.CHANNEL_TYPES:
-        raise HTTPException(status_code=422, detail=f"Unknown channel type: {request.channel_type}")
-    # On create there is no stored secret behind the mask placeholder - treat
-    # a literal mask as empty so validation rejects it instead of storing it
+        raise HTTPException(status_code=422, detail=f"Unknown destination service: {request.channel_type}. Select a service from the list.")
+    # Storing the literal mask would save it as the secret.
     config = {k: ("" if v == nc.MASK else v) for k, v in (request.config or {}).items()}
     ok, error = nc.validate_config(request.channel_type, config)
     if not ok:
@@ -118,17 +110,21 @@ def create_channel(request: ChannelRequest, db: Session = Depends(get_db)):
         raise internal_error(e)
 
 
-@router.put("/channels/{channel_id}")
+@router.put("/channels/{channel_id}", responses=documented(m.NotificationChannel, errors={404: None, 422: Invalid, 500: None}))
 def update_channel(channel_id: int, request: ChannelRequest, db: Session = Depends(get_db)):
     """Update a channel. Masked secrets left untouched keep their stored value."""
     if request.channel_type not in nc.CHANNEL_TYPES:
-        raise HTTPException(status_code=422, detail=f"Unknown channel type: {request.channel_type}")
+        raise HTTPException(status_code=422, detail=f"Unknown destination service: {request.channel_type}. Select a service from the list.")
     try:
         channel = db.query(NotificationChannel).filter(NotificationChannel.id == channel_id).first()
         if not channel:
-            raise HTTPException(status_code=404, detail="Channel not found")
+            raise HTTPException(status_code=404, detail="This destination no longer exists. Reload the destination list.")
 
-        merged = nc.merge_config(request.channel_type, channel.config or {}, request.config)
+        stored = (channel.config or {}) if request.channel_type == channel.channel_type else {}
+        try:
+            merged = nc.merge_config(request.channel_type, stored, request.config)
+        except nc.SecretEndpointChanged as e:
+            raise HTTPException(status_code=422, detail=str(e))
         ok, error = nc.validate_config(request.channel_type, merged)
         if not ok:
             raise HTTPException(status_code=422, detail=error)
@@ -149,13 +145,13 @@ def update_channel(channel_id: int, request: ChannelRequest, db: Session = Depen
         raise internal_error(e)
 
 
-@router.delete("/channels/{channel_id}")
+@router.delete("/channels/{channel_id}", responses=documented(m.NotificationChannelDeleted, errors={404: None, 422: Invalid, 500: None}))
 def delete_channel(channel_id: int, db: Session = Depends(get_db)):
     """Remove a channel."""
     try:
         channel = db.query(NotificationChannel).filter(NotificationChannel.id == channel_id).first()
         if not channel:
-            raise HTTPException(status_code=404, detail="Channel not found")
+            raise HTTPException(status_code=404, detail="This destination no longer exists. Reload the destination list.")
         db.delete(channel)
         db.commit()
         return {"status": "success"}
@@ -167,7 +163,7 @@ def delete_channel(channel_id: int, db: Session = Depends(get_db)):
         raise internal_error(e)
 
 
-@router.post("/channels/{channel_id}/test")
+@router.post("/channels/{channel_id}/test", responses=documented(m.NotificationTest, description="Sent; success says whether the service accepted it", errors={404: None, 422: Invalid, 500: None}))
 async def test_saved_channel(channel_id: int):
     """Send a test notification to a saved channel."""
     from ..database import get_db_context
@@ -181,7 +177,7 @@ async def test_saved_channel(channel_id: int):
 
     channel = await asyncio.to_thread(_load)
     if not channel:
-        raise HTTPException(status_code=404, detail="Channel not found")
+        raise HTTPException(status_code=404, detail="This destination no longer exists. Reload the destination list.")
 
     ok, error = await asyncio.to_thread(
         nc.send_to_config, channel["type"], channel["config"],
@@ -193,18 +189,18 @@ async def test_saved_channel(channel_id: int):
     return {
         "success": ok,
         "logs": [
-            f"Channel: {channel['name']} ({channel['type']})",
+            f"Destination: {channel['name']} ({channel['type']})",
             "Sending test notification...",
-            "Delivered successfully" if ok else f"Failed: {error}",
+            "The service accepted the test notification" if ok else f"Failed: {error}",
         ],
     }
 
 
-@router.post("/test")
+@router.post("/test", responses=documented(m.NotificationTest, description="Tried; success says whether the service accepted it", errors={422: Invalid}))
 async def test_unsaved_channel(request: ChannelTestRequest):
     """Test a channel configuration before saving it."""
     if request.channel_type not in nc.CHANNEL_TYPES:
-        raise HTTPException(status_code=422, detail=f"Unknown channel type: {request.channel_type}")
+        raise HTTPException(status_code=422, detail=f"Unknown destination service: {request.channel_type}. Select a service from the list.")
     ok, error = await asyncio.to_thread(
         nc.send_to_config, request.channel_type, request.config,
         "Test notification",
@@ -214,8 +210,8 @@ async def test_unsaved_channel(request: ChannelTestRequest):
     return {
         "success": ok,
         "logs": [
-            f"Channel type: {request.channel_type}",
+            f"Service: {request.channel_type}",
             "Sending test notification...",
-            "Delivered successfully" if ok else f"Failed: {error}",
+            "The service accepted the test notification" if ok else f"Failed: {error}",
         ],
     }

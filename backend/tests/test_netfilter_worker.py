@@ -1,8 +1,7 @@
-"""Netfilter network I/O stays async while database work runs in a worker."""
 import asyncio
 import threading
 from contextlib import contextmanager
-from unittest.mock import AsyncMock, Mock
+from unittest.mock import AsyncMock, MagicMock, Mock
 
 import pytest
 from app import scheduler
@@ -20,7 +19,7 @@ def isolated_state(monkeypatch):
 def test_ingestion_keeps_loop_responsive(monkeypatch):
     started, release, finished = threading.Event(), threading.Event(), threading.Event()
     threads, api_threads = [], []
-    db = Mock()
+    db = MagicMock()
     db.query.return_value.filter.return_value.first.return_value = None
     db.commit.side_effect = lambda: threads.append(threading.get_ident())
     async def fetch(**kwargs):
@@ -101,7 +100,6 @@ def test_overlapping_batches_preserve_data_and_deduplication(monkeypatch):
     try:
         Base.metadata.create_all(isolated, tables=[NetfilterLog.__table__])
         asyncio.run(run())
-        # Also prove deduplication from persisted rows after an empty memory cache.
         scheduler.seen_netfilter.clear()
         asyncio.run(scheduler.fetch_and_store_netfilter())
         with session() as db:

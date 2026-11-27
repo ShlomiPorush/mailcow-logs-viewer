@@ -1,0 +1,229 @@
+import asyncio
+import ipaddress
+import json
+import logging
+import socket
+import time
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
+from urllib.parse import urlsplit, urlunsplit
+
+import httpx
+
+logger = logging.getLogger(__name__)
+
+MAX_URL_LENGTH = 512
+MAX_BYTES = 64 * 1024
+TIMEOUT_SECONDS = 5.0
+CACHE_MAX_ENTRIES = 100
+CACHE_DEFAULT_SECONDS = 3600
+CACHE_MIN_SECONDS = 300
+CACHE_MAX_SECONDS = 86400
+MAX_CONCURRENT_FETCHES = 4
+
+
+REASONS: Dict[str, str] = {
+    "address_too_long": "The client's address is too long.",
+    "address_invalid": "The client's address is not valid.",
+    "address_not_https": "The client's address must be a plain https address.",
+    "address_port": "The client's address must use the standard https port.",
+    "address_no_document": "The client's address must name a document.",
+    "address_ip": "The client's address must use a host name.",
+    "host_unknown": "The client's host could not be found.",
+    "host_private": "The client's host is not a public address.",
+    "not_json": "The client's document is not valid JSON.",
+    "not_object": "The client's document is not a JSON object.",
+    "other_client": "The client's document names another client.",
+    "no_name": "The client's document has no usable name.",
+    "no_redirects": "The client's document has no usable redirect addresses.",
+    "auth_method": "The client wants a sign-in method this app does not offer.",
+    "too_slow": "The client's document took too long to fetch.",
+    "http_error": "The client's document answered with an error.",
+    "compressed": "The client's document came compressed.",
+    "too_large": "The client's document is too large.",
+    "fetch_failed": "The client's document could not be fetched.",
+}
+
+
+class ClientDocumentError(Exception):
+    def __init__(self, reason: str):
+        super().__init__(REASONS[reason])
+        self.reason = reason
+
+
+def reason_text(error: ClientDocumentError) -> str:
+    # Looking the text up by error.reason directly brings back CodeQL's alert on the error page (#508)
+    return next((text for reason, text in REASONS.items() if reason == error.reason),
+                "The client's details cannot be used.")
+
+
+@dataclass(frozen=True)
+class ClientDocument:
+    client_id: str
+    client_name: str
+    redirect_uris: Tuple[str, ...]
+    publisher: str
+
+
+_cache: Dict[str, Tuple[float, ClientDocument]] = {}
+_semaphore: Optional[asyncio.Semaphore] = None
+
+
+def is_document_client_id(client_id: str) -> bool:
+    return bool(client_id) and client_id.startswith("https://")
+
+
+def _check_url(url: str) -> Tuple[str, str]:
+    if len(url) > MAX_URL_LENGTH:
+        raise ClientDocumentError("address_too_long")
+    try:
+        parts = urlsplit(url)
+        port = parts.port
+    except ValueError:
+        raise ClientDocumentError("address_invalid")
+    if parts.scheme != "https" or not parts.hostname or parts.username or parts.password or parts.fragment:
+        raise ClientDocumentError("address_not_https")
+    if port not in (None, 443):
+        raise ClientDocumentError("address_port")
+    if not parts.path or parts.path == "/":
+        raise ClientDocumentError("address_no_document")
+    host = parts.hostname.lower()
+    try:
+        ipaddress.ip_address(host)
+        raise ClientDocumentError("address_ip")
+    except ValueError:
+        pass
+    target = parts.path + (f"?{parts.query}" if parts.query else "")
+    return host, target
+
+
+_NAT64 = ipaddress.ip_network("64:ff9b::/96")
+
+
+def _public_one(ip) -> bool:
+    return (ip.is_global and not ip.is_multicast and not ip.is_private and not ip.is_loopback
+            and not ip.is_link_local and not ip.is_reserved and not ip.is_unspecified
+            and not getattr(ip, "is_site_local", False))
+
+
+def _public(address: str) -> bool:
+    try:
+        ip = ipaddress.ip_address(address.split("%", 1)[0])
+    except ValueError:
+        return False
+    if not _public_one(ip) and not (isinstance(ip, ipaddress.IPv6Address) and ip in _NAT64):
+        return False
+    if isinstance(ip, ipaddress.IPv6Address):
+        embedded = [ip.ipv4_mapped, ip.sixtofour, ip.teredo[1] if ip.teredo else None,
+                    ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF) if ip in _NAT64 else None]
+        if any(v4 is not None and not _public_one(v4) for v4 in embedded):
+            return False
+    return True
+
+
+async def _resolve(host: str) -> str:
+    loop = asyncio.get_running_loop()
+    try:
+        infos = await asyncio.wait_for(loop.getaddrinfo(host, 443, type=socket.SOCK_STREAM), TIMEOUT_SECONDS)
+    except (OSError, asyncio.TimeoutError):
+        raise ClientDocumentError("host_unknown")
+    addresses = [info[4][0] for info in infos]
+    if not addresses:
+        raise ClientDocumentError("host_unknown")
+    if not all(_public(a) for a in addresses):
+        raise ClientDocumentError("host_private")
+    return addresses[0]
+
+
+def _cache_seconds(cache_control: str) -> int:
+    seconds = CACHE_DEFAULT_SECONDS
+    for part in (cache_control or "").split(","):
+        name, _, value = part.strip().partition("=")
+        if name.lower() in ("no-store", "no-cache"):
+            return CACHE_MIN_SECONDS
+        if name.lower() == "max-age" and value.isdigit():
+            seconds = int(value)
+    return max(CACHE_MIN_SECONDS, min(CACHE_MAX_SECONDS, seconds))
+
+
+def parse_document(url: str, body: bytes, publisher: str) -> ClientDocument:
+    from .oauth import valid_redirect_uri
+
+    try:
+        doc = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise ClientDocumentError("not_json")
+    if not isinstance(doc, dict):
+        raise ClientDocumentError("not_object")
+    if doc.get("client_id") != url:
+        raise ClientDocumentError("other_client")
+    name = doc.get("client_name")
+    if not isinstance(name, str) or not name.strip() or len(name) > 100:
+        raise ClientDocumentError("no_name")
+    uris = doc.get("redirect_uris")
+    if not isinstance(uris, list) or not uris or len(uris) > 20 \
+            or not all(isinstance(u, str) and valid_redirect_uri(u) for u in uris):
+        raise ClientDocumentError("no_redirects")
+    method = doc.get("token_endpoint_auth_method", "none")
+    if method != "none" and not _also_offers_none(doc.get("token_endpoint_auth_methods_supported")):
+        raise ClientDocumentError("auth_method")
+    return ClientDocument(url, name.strip(), tuple(uris), publisher)
+
+
+def _also_offers_none(methods) -> bool:
+    return isinstance(methods, list) and all(isinstance(m, str) for m in methods) and "none" in methods
+
+
+async def fetch(url: str) -> ClientDocument:
+    cached = _cache.get(url)
+    if cached and cached[0] > time.monotonic():
+        return cached[1]
+    host, target = _check_url(url)
+    try:
+        async with asyncio.timeout(TIMEOUT_SECONDS):
+            return await _fetch(url, host, target)
+    except TimeoutError:
+        logger.info(f"Agent access: the client document of {host} took too long")
+        raise ClientDocumentError("too_slow")
+
+
+async def _fetch(url: str, host: str, target: str) -> ClientDocument:
+    global _semaphore
+    if _semaphore is None:
+        _semaphore = asyncio.Semaphore(MAX_CONCURRENT_FETCHES)
+    async with _semaphore:
+        address = await _resolve(host)
+        netloc = f"[{address}]" if ":" in address else address
+        pinned = urlunsplit(("https", netloc, target, "", ""))
+        try:
+            async with httpx.AsyncClient(timeout=TIMEOUT_SECONDS, follow_redirects=False, trust_env=False) as client:
+                async with client.stream(
+                    "GET", pinned,
+                    headers={"Host": host, "Accept": "application/json", "Accept-Encoding": "identity"},
+                    extensions={"sni_hostname": host},
+                ) as response:
+                    if response.status_code != 200:
+                        logger.info(f"Agent access: the client document of {host} answered {response.status_code}")
+                        raise ClientDocumentError("http_error")
+                    encoding = response.headers.get("content-encoding", "identity").strip().lower()
+                    if encoding not in ("", "identity"):
+                        raise ClientDocumentError("compressed")
+                    length = response.headers.get("content-length")
+                    if length and length.isdigit() and int(length) > MAX_BYTES:
+                        raise ClientDocumentError("too_large")
+                    body = bytearray()
+                    async for chunk in response.aiter_raw():
+                        body.extend(chunk)
+                        if len(body) > MAX_BYTES:
+                            raise ClientDocumentError("too_large")
+                    cache_control = response.headers.get("cache-control", "")
+        except ClientDocumentError:
+            raise
+        except (httpx.HTTPError, OSError) as e:
+            logger.info(f"Agent access: could not fetch the client document of {host}: {type(e).__name__}")
+            raise ClientDocumentError("fetch_failed")
+    document = parse_document(url, bytes(body), host)
+    if len(_cache) >= CACHE_MAX_ENTRIES:
+        _cache.pop(min(_cache, key=lambda k: _cache[k][0]), None)
+    _cache[url] = (time.monotonic() + _cache_seconds(cache_control), document)
+    return document

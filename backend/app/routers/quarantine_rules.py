@@ -1,20 +1,18 @@
-"""
-Quarantine Auto-Rules API
-CRUD endpoints for quarantine rules and action history.
-Requires Read-Write API key (MAILCOW_API_KEY_RW) for all operations.
-"""
 import asyncio
-import re
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
+import regex
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from ..database import get_db_context
 from ..models import QuarantineRule, QuarantineRuleLog
 from ..mailcow_api import mailcow_api
+from ..utils import internal_error, format_datetime_for_api
+from ..api_models import Invalid, documented
+from ..api_models import quarantine_rules as m
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +21,6 @@ router = APIRouter(prefix="/api/quarantine/rules", tags=["quarantine-rules"])
 VALID_MATCH_TYPES = {'sender', 'sender_domain', 'recipient', 'subject'}
 VALID_ACTIONS = {'release', 'delete'}
 
-
-# ---- Pydantic schemas ----
 
 class RuleCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -45,7 +41,6 @@ class RuleUpdate(BaseModel):
 
 
 def _require_rw_key():
-    """Raise 403 if no RW key is configured."""
     if not mailcow_api.has_rw_key:
         raise HTTPException(
             status_code=403,
@@ -53,12 +48,81 @@ def _require_rw_key():
         )
 
 
-def _validate_regex(pattern: str):
-    """Validate a regex pattern."""
+try:
+    from re import _parser as _sre_parse
+except ImportError:  # pragma: no cover
+    import sre_parse as _sre_parse
+
+REGEX_TARGET_MAX_CHARS = 1000
+REGEX_MATCH_TIMEOUT_SECONDS = 0.1
+
+_REPEATS = (_sre_parse.MAX_REPEAT, _sre_parse.MIN_REPEAT)
+_ZERO_WIDTH = (_sre_parse.AT,)
+_warned_patterns = set()
+
+
+def _only_variable_items(items) -> tuple:
+    unbounded = False
+    seen = False
+    for op, av in items:
+        if op in _ZERO_WIDTH:
+            continue
+        seen = True
+        if op in _REPEATS:
+            low, high, _sub = av
+            if low == high:
+                return False, unbounded
+            unbounded = unbounded or high == _sre_parse.MAXREPEAT
+        elif op == _sre_parse.SUBPATTERN:
+            variable, inner_unbounded = _only_variable_items(av[-1])
+            if not variable:
+                return False, unbounded
+            unbounded = unbounded or inner_unbounded
+        else:
+            return False, unbounded
+    return seen, unbounded
+
+
+def _has_nested_repetition(items) -> bool:
+    for op, av in items:
+        if op in _REPEATS:
+            _low, high, sub = av
+            if high > 1:
+                variable, unbounded = _only_variable_items(sub)
+                if variable and unbounded:
+                    return True
+            if _has_nested_repetition(sub):
+                return True
+        elif op == _sre_parse.SUBPATTERN:
+            if _has_nested_repetition(av[-1]):
+                return True
+        elif op == _sre_parse.BRANCH:
+            if any(_has_nested_repetition(branch) for branch in av[1]):
+                return True
+        elif op in (_sre_parse.ASSERT, _sre_parse.ASSERT_NOT):
+            if _has_nested_repetition(av[1]):
+                return True
+    return False
+
+
+def _is_nested_repetition(pattern: str) -> bool:
     try:
-        re.compile(pattern)
-    except re.error as e:
+        return _has_nested_repetition(_sre_parse.parse(pattern))
+    except Exception:
+        return False
+
+
+def _validate_regex(pattern: str):
+    try:
+        regex.compile(pattern)
+    except regex.error as e:
         raise HTTPException(status_code=400, detail=f"Invalid regex pattern: {e}")
+    if _is_nested_repetition(pattern):
+        raise HTTPException(
+            status_code=400,
+            detail="This pattern repeats a group that itself repeats (nested repetition, "
+                   "like (a+)+). It can freeze the app on some messages - rewrite it "
+                   "without the nested repetition.")
 
 
 def _rule_to_dict(rule: QuarantineRule) -> dict:
@@ -71,19 +135,14 @@ def _rule_to_dict(rule: QuarantineRule) -> dict:
         "action": rule.action,
         "enabled": rule.enabled,
         "hit_count": rule.hit_count or 0,
-        "last_hit_at": rule.last_hit_at.isoformat() + 'Z' if rule.last_hit_at else None,
+        "last_hit_at": format_datetime_for_api(rule.last_hit_at),
         "notes": rule.notes,
-        "created_at": rule.created_at.isoformat() + 'Z' if rule.created_at else None,
-        "updated_at": rule.updated_at.isoformat() + 'Z' if rule.updated_at else None,
+        "created_at": format_datetime_for_api(rule.created_at),
+        "updated_at": format_datetime_for_api(rule.updated_at),
     }
 
 
 def _find_matching_rule(rules, sender: str, sender_domain: str, rcpt: str, subject: str):
-    """
-    Find the first matching rule for a quarantine item.
-    Delete rules are checked first (deny wins over allow).
-    """
-    # Sort: delete rules first, then release
     sorted_rules = sorted(rules, key=lambda r: (0 if r.action == 'delete' else 1))
     
     for rule in sorted_rules:
@@ -101,31 +160,39 @@ def _find_matching_rule(rules, sender: str, sender_domain: str, rcpt: str, subje
             continue
         
         if rule.is_regex:
+            if _is_nested_repetition(value):
+                if value not in _warned_patterns:
+                    _warned_patterns.add(value)
+                    logger.warning(f"[QUARANTINE RULES] Skipping rule '{rule.name}': its pattern "
+                                   f"has nested repetition. Edit the rule to rewrite it.")
+                continue
             try:
-                if re.search(value, target, re.IGNORECASE):
+                if regex.search(value, (target or '')[:REGEX_TARGET_MAX_CHARS], regex.IGNORECASE,
+                                timeout=REGEX_MATCH_TIMEOUT_SECONDS):
                     return rule
-            except re.error:
+            except TimeoutError:
+                if value not in _warned_patterns:
+                    _warned_patterns.add(value)
+                    logger.warning(f"[QUARANTINE RULES] Rule '{rule.name}' took too long to match and "
+                                   f"was skipped. Edit the rule to simplify its pattern.")
+                continue
+            except regex.error:
                 continue
         else:
-            # Case-insensitive exact match
-            if target == value.lower():
+            if (target or '').lower() == value.lower():
                 return rule
     
     return None
 
 
-# ---- CRUD Endpoints ----
-# IMPORTANT: Static routes (/logs, /test) MUST be defined before
-# parameterized routes (/{rule_id}) to avoid FastAPI matching "logs" as a rule_id.
-
-@router.get("")
+@router.get("", responses=documented(m.QuarantineRuleList, errors={403: None, 500: None}))
 def list_rules():
     """List all quarantine rules."""
     _require_rw_key()
     
     with get_db_context() as db:
         rules = db.query(QuarantineRule).order_by(
-            QuarantineRule.action.desc(),  # delete rules first
+            QuarantineRule.action,
             QuarantineRule.created_at.desc()
         ).all()
         return {
@@ -134,7 +201,7 @@ def list_rules():
         }
 
 
-@router.post("")
+@router.post("", responses=documented(m.QuarantineRule, errors={400: None, 403: None, 422: Invalid, 500: None}))
 def create_rule(body: RuleCreate):
     """Create a new quarantine rule."""
     _require_rw_key()
@@ -163,11 +230,9 @@ def create_rule(body: RuleCreate):
         return _rule_to_dict(rule)
 
 
-# ---- Action History (must be before /{rule_id}) ----
-
-@router.get("/logs")
+@router.get("/logs", responses=documented(m.QuarantineRuleLogs, errors={403: None, 422: Invalid, 500: None}))
 def get_rule_logs(
-    limit: int = Query(default=50, le=200),
+    limit: int = Query(default=50, ge=0, le=200),
     offset: int = Query(default=0, ge=0),
     rule_id: Optional[int] = Query(default=None),
 ):
@@ -198,16 +263,12 @@ def get_rule_logs(
                 "subject": log.subject,
                 "matched_field": log.matched_field,
                 "matched_value": log.matched_value,
-                "created_at": log.created_at.isoformat() + 'Z' if log.created_at else None,
+                "created_at": format_datetime_for_api(log.created_at),
             } for log in logs]
         }
 
 
-# ---- Dry-Run Test (must be before /{rule_id}) ----
-
 def _load_preview_rules_worker():
-    """Load detached rule fields with a worker-owned database session."""
-    # Load ALL rules (enabled + disabled) and convert to plain objects
     with get_db_context() as db:
         db_rules = db.query(QuarantineRule).all()
         rules = []
@@ -221,7 +282,7 @@ def _load_preview_rules_worker():
     return rules
 
 
-@router.post("/test")
+@router.post("/test", responses=documented(m.QuarantineRuleTest, errors={403: None, 500: None, 502: None}))
 async def test_rules():
     """
     Test all rules against current quarantine items (dry-run).
@@ -239,7 +300,7 @@ async def test_rules():
         quarantine = await mailcow_api.get_quarantine()
     except Exception as e:
         logger.error("Failed to fetch quarantine for rule preview: %s", e)
-        raise HTTPException(status_code=500, detail="Failed to fetch quarantine. Check the application logs.")
+        raise internal_error(e)
     
     if not quarantine:
         return {"matches": [], "total_matches": 0, "total_quarantine": 0, "message": "Quarantine is empty"}
@@ -272,9 +333,7 @@ async def test_rules():
     }
 
 
-# ---- Parameterized routes (/{rule_id}) ----
-
-@router.put("/{rule_id}")
+@router.put("/{rule_id}", responses=documented(m.QuarantineRule, errors={400: None, 403: None, 404: None, 422: Invalid, 500: None}))
 def update_rule(rule_id: int, body: RuleUpdate):
     """Update an existing quarantine rule."""
     _require_rw_key()
@@ -320,7 +379,7 @@ def update_rule(rule_id: int, body: RuleUpdate):
         return _rule_to_dict(rule)
 
 
-@router.delete("/{rule_id}")
+@router.delete("/{rule_id}", responses=documented(m.QuarantineRuleDeleted, errors={403: None, 404: None, 422: Invalid, 500: None}))
 def delete_rule(rule_id: int):
     """Delete a quarantine rule."""
     _require_rw_key()
@@ -338,7 +397,7 @@ def delete_rule(rule_id: int):
         return {"success": True, "message": f"Rule '{rule_name}' deleted"}
 
 
-@router.post("/{rule_id}/toggle")
+@router.post("/{rule_id}/toggle", responses=documented(m.QuarantineRule, errors={403: None, 404: None, 422: Invalid, 500: None}))
 def toggle_rule(rule_id: int):
     """Toggle a rule's enabled/disabled state."""
     _require_rw_key()

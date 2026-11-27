@@ -1,5 +1,5 @@
-"""API fallbacks must not serialize database exception details."""
 import logging
+import secrets
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -21,10 +21,9 @@ from app.routers import mailbox_stats, stats
     (stats, "/stats/recent-activity", "activity"),
 ])
 def test_database_errors_remain_server_side(monkeypatch, caplog, module, path, fallback):
-    private_detail = "SELECT private_column FROM private_table; token=synthetic-secret"
+    private_detail = f"SELECT private_column FROM private_table; token={secrets.token_hex(16)}"
     db = Mock()
     db.query.side_effect = RuntimeError(private_detail)
-    monkeypatch.setattr(mailbox_stats, "_stats_cache", {})
     app = FastAPI()
     app.include_router(module.router)
     app.dependency_overrides[module.get_db] = lambda: db
@@ -56,7 +55,7 @@ def test_settings_validation_hides_input_values(monkeypatch):
 
 
 @pytest.mark.parametrize("path,target,code", [
-    ("/status/storage", "get_status_vmail", 500),
+    ("/status/storage", "get_status_vmail", 502),
     ("/status/mailcow-connection", "test_connection", 200),
 ])
 def test_upstream_errors_are_not_returned(monkeypatch, path, target, code):

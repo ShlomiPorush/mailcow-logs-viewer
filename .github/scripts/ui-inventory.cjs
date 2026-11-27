@@ -1,17 +1,4 @@
 #!/usr/bin/env node
-// Static inventory of the web UI: pages, inline actions, handlers, modals and
-// the API endpoints the frontend calls. It backs two guards:
-//   - every inline handler (onclick="fn(...)" and friends) names a function
-//     that is actually defined somewhere in the frontend, and
-//   - nothing listed in the committed baseline silently disappears, so a
-//     redesign cannot drop a page, button, modal, API call, form field,
-//     drop-down option or setting by accident.
-//
-// Usage:
-//   node .github/scripts/ui-inventory.cjs               print the inventory (Markdown)
-//   node .github/scripts/ui-inventory.cjs --json        print it as JSON
-//   node .github/scripts/ui-inventory.cjs --write-baseline
-//        rewrite .github/tests/ui-inventory.baseline.json after an intentional change
 'use strict';
 
 const fs = require('node:fs');
@@ -42,9 +29,7 @@ function frontendFiles(dir) {
         .map(f => ({ name: f, text: stripComments(fs.readFileSync(path.join(dir, f), 'utf8')) }));
 }
 
-// Comments document handler patterns ("onclick=\"fn(...)\"") without being code.
 function stripComments(text) {
-    // Repeat until stable so removing one comment cannot join the pieces of another.
     let prev;
     do {
         prev = text;
@@ -55,10 +40,8 @@ function stripComments(text) {
         .replace(/^\s*\/\/.*$/gm, '');
 }
 
-// Identifiers called at the top level of an inline handler expression,
-// e.g. "event.stopPropagation(); showHelp('dmarc')" -> ['showHelp'].
 function calledNames(expr) {
-    expr = expr.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g, "''");   // ignore text inside string literals
+    expr = expr.replace(/'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"/g, "''");
     const names = [];
     const re = /(^|[^.\w$])([A-Za-z_$][\w$]*)\s*\(/g;
     let m;
@@ -66,9 +49,8 @@ function calledNames(expr) {
     return names.filter(n => !BUILTINS.has(n));
 }
 
-// A stable name for one user action: the function plus its first argument
-// when that argument is a plain literal, e.g. navigateTo:queue.
 function actionKey(expr) {
+    expr = expr.replace(/^\s*if \(!uiRowHeld\(event\)\)\s*\{?\s*/, '');
     const m = expr.match(/(?:^|[^.\w$])([A-Za-z_$][\w$]*)\s*\(\s*(['"])([^'"$\\{}]*)\2/);
     if (m && !BUILTINS.has(m[1])) return `${m[1]}:${m[3]}`;
     const names = calledNames(expr);
@@ -93,9 +75,6 @@ function definedNames(files) {
     return defs;
 }
 
-// Frontend API calls, normalised so they can be compared with backend routes:
-// template placeholders become {param}; a trailing slash means the path is
-// completed by string concatenation at runtime.
 function apiCalls(files) {
     const calls = new Map();
     const re = /(['"`])(\/api\/[^'"`\s?#]*)/g;
@@ -124,8 +103,6 @@ function modals(files) {
     return [...html.matchAll(/\sid="([^"]*modal[^"]*)"/gi)].map(m => m[1]).sort();
 }
 
-// The fixed id in a tag's attributes, or null. The value must close with the
-// quote it opened with, so id="edit-' + key + '" (built at runtime) is skipped.
 function fixedId(attrs) {
     const m = attrs.match(/\bid\s*=\s*\\?(["'])([^"'\\]+)\\?\1/);
     return m && !m[2].includes('${') ? m[2] : null;
@@ -136,8 +113,6 @@ function addTo(map, key, file) {
     map.get(key).add(file);
 }
 
-// Form fields with a fixed id (input, select, textarea), in index.html and in
-// markup rendered from JavaScript. Ids built at runtime (id="x-${n}") are skipped.
 function controls(files) {
     const out = new Map();
     const tag = /<(?:input|select|textarea)\b([^>]*)>/g;
@@ -150,9 +125,6 @@ function controls(files) {
     return out;
 }
 
-// Every fixed option of every drop-down, as "select-id=value", plus the
-// predefined choices of Settings fields (SETTINGS_FIELD_OPTIONS in settings.js)
-// as "setting:key=value".
 function options(files) {
     const out = new Map();
     const select = /<select\b([^>]*)>([\s\S]*?)<\/select>/g;
@@ -175,8 +147,6 @@ function options(files) {
     return out;
 }
 
-// Every setting the Settings page offers, from the tab definitions in settings.js
-// (groups: [{ label, keys: ['smtp_host', ...] }]).
 function settingsKeys(files) {
     const settings = files.find(f => f.name === 'settings.js');
     if (!settings) return [];
@@ -190,17 +160,21 @@ function settingsKeys(files) {
 function collect(dir = FRONTEND) {
     const files = frontendFiles(dir);
     const defined = definedNames(files);
-    const handlers = new Map();   // function name -> Set(files)
-    const actions = new Map();    // action key -> Set(files)
+    const handlers = new Map();
+    const actions = new Map();
     const undefinedHandlers = new Map();
 
     for (const f of files) {
-        HANDLER_ATTR.lastIndex = 0;
-        let m;
-        while ((m = HANDLER_ATTR.exec(f.text))) {
-            const expr = m[3];
-            // Handler attributes that are themselves template output, e.g.
-            // onclick="${action}", are resolved at runtime; the browser pass checks those.
+        const exprs = [...f.text.matchAll(HANDLER_ATTR)].map(m => m[3])
+            .concat([...f.text.matchAll(/\bon(?:click|submit):\s*`([^`]*)`/g)].map(m => m[1]))
+            .concat([...f.text.matchAll(/\b(?:close|backdropClose):\s*([A-Za-z_$][\w$]*)\s*[,}\n]/g)]
+                .filter(m => !['null', 'undefined', 'true', 'false'].includes(m[1])).map(m => `${m[1]}()`));
+        for (const m of f.text.matchAll(/data-picker="([a-z0-9-]+)"|\buiPicker\(\{\s*id:\s*'([a-z0-9-]+)'/g)) {
+            const key = `picker:${m[1] || m[2]}`;
+            if (!actions.has(key)) actions.set(key, new Set());
+            actions.get(key).add(f.name);
+        }
+        for (const expr of exprs) {
             if (/^\s*\$\{[^}]*\}\s*$/.test(expr)) continue;
             for (const name of calledNames(expr.replace(/\$\{[^}]*\}/g, '0'))) {
                 if (!handlers.has(name)) handlers.set(name, new Set());

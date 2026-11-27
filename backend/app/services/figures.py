@@ -1,0 +1,213 @@
+import asyncio
+import logging
+import re
+import threading
+import time
+from datetime import datetime, timedelta
+from typing import Dict, Optional
+
+from sqlalchemy import func, text
+from sqlalchemy.orm import Session
+
+from ..config import settings
+
+logger = logging.getLogger(__name__)
+
+METRICS: Dict[str, Optional[str]] = {
+    'storage_used': None,
+    'security_review': 'netfilter',
+    'security_banned': 'netfilter',
+}
+KEEP_DAYS = 90
+SOURCE_TIMEOUT = 30
+_LOCK_KEY = 0x4D4C5602
+
+_epochs: Dict[str, int] = {}
+_epochs_lock = threading.Lock()
+
+
+def feature_epoch(feature: str) -> int:
+    with _epochs_lock:
+        return _epochs.get(feature, 0)
+
+
+def bump_feature_epoch(feature: str) -> None:
+    with _epochs_lock:
+        _epochs[feature] = _epochs.get(feature, 0) + 1
+
+
+def lock_metric_rows(db: Session) -> None:
+    db.execute(text('SELECT pg_advisory_xact_lock(:key)'), {'key': _LOCK_KEY})
+
+
+def metric_on(name: str) -> bool:
+    feature = METRICS.get(name)
+    return feature is None or settings.is_feature_enabled(feature)
+
+
+def _now() -> datetime:
+    return datetime.utcnow()
+
+
+_PERCENT = re.compile(r'^\s*(\d+(?:\.\d+)?)\s*%?\s*$')
+
+
+def parse_percent(value) -> Optional[float]:
+    match = _PERCENT.match(str(value)) if value is not None else None
+    return float(match.group(1)) if match else None
+
+
+async def storage_figure() -> dict:
+    from ..mailcow_api import mailcow_api
+    try:
+        vmail = await mailcow_api.get_status_vmail()
+    except Exception as e:
+        logger.info(f"Storage figure: mailcow did not answer ({e})")
+        vmail = None
+    vmail = vmail or {}
+    percent = parse_percent(vmail.get('used_percent'))
+    return {
+        'value': percent, 'of': 100.0, 'valid': percent is not None, 'as_of': _now(),
+        'disk': vmail.get('disk', 'unknown'), 'used': vmail.get('used', '0'), 'total': vmail.get('total', '0'),
+        'used_percent': vmail.get('used_percent', '0%'),
+    }
+
+
+def linking_figure(db: Session) -> dict:
+    from ..models import MessageCorrelation
+    try:
+        total = db.query(func.count(MessageCorrelation.id)).scalar() or 0
+        complete = db.query(func.count(MessageCorrelation.id)).filter(
+            MessageCorrelation.is_complete == True,  # noqa: E712
+            MessageCorrelation.final_status != 'expired',
+        ).scalar() or 0
+        incomplete = db.query(func.count(MessageCorrelation.id)).filter(
+            MessageCorrelation.is_complete == False  # noqa: E712
+        ).scalar() or 0
+        expired = db.query(func.count(MessageCorrelation.id)).filter(
+            MessageCorrelation.final_status == 'expired'
+        ).scalar() or 0
+    except Exception as e:
+        logger.warning(f"Linking figure: {e}")
+        return {'value': None, 'of': 100.0, 'valid': False, 'as_of': _now(), 'total': 0, 'complete': 0, 'incomplete': 0, 'expired': 0}
+    rate = round(complete / total * 100, 2) if total > 0 else 0
+    return {'value': rate, 'of': 100.0, 'valid': True, 'as_of': _now(),
+            'total': total, 'complete': complete, 'incomplete': incomplete, 'expired': expired}
+
+
+def blocklists_figure(summary: dict) -> dict:
+    hosts = summary.get('hosts') or []
+    listed = sum(1 for h in hosts if h.get('status') == 'listed')
+    valid = bool(summary.get('has_data')) and summary.get('status') in ('listed', 'clean')
+    return {'value': float(listed) if valid else None, 'of': float(len(hosts)), 'valid': valid, 'as_of': _now()}
+
+
+def security_figures(addresses, fail2ban_known: bool) -> dict:
+    review = sum(1 for a in addresses if a.get('list') == 'review')
+    banned = sum(1 for a in addresses if a.get('list') == 'banned')
+    now = _now()
+    return {
+        'security_review': {'value': float(review) if fail2ban_known else None, 'of': None, 'valid': fail2ban_known, 'as_of': now},
+        'security_banned': {'value': float(banned) if fail2ban_known else None, 'of': None, 'valid': fail2ban_known, 'as_of': now},
+    }
+
+
+def _in_session(fn, budget: float = None):
+    from sqlalchemy import event
+    from ..database import get_db_context
+    budget = SOURCE_TIMEOUT - 5 if budget is None else budget
+    deadline = time.monotonic() + budget
+
+    def bounded(conn, cursor, statement, parameters, context, executemany):
+        left = deadline - time.monotonic()
+        if left <= 0.05:
+            raise TimeoutError(f'the source took more than its {budget:.0f} s')
+        cursor.execute(f"SET LOCAL statement_timeout = {int(left * 1000)}")
+
+    with get_db_context() as db:
+        conn = db.connection()
+        event.listen(conn, 'before_cursor_execute', bounded)
+        try:
+            return fn(db)
+        finally:
+            event.remove(conn, 'before_cursor_execute', bounded)
+
+
+async def collect_figures() -> Dict[str, dict]:
+    points: Dict[str, dict] = {}
+
+    async def bounded(work, label):
+        try:
+            return await asyncio.wait_for(work, SOURCE_TIMEOUT)
+        except Exception as e:
+            logger.info(f"Trend sample of {label} left out this hour: {e or type(e).__name__}")
+            return None
+
+    storage = await bounded(storage_figure(), 'mail storage')
+    if storage and storage['valid']:
+        points['storage_used'] = storage
+    if metric_on('security_review'):
+        from ..mailcow_api import mailcow_api
+        from . import security_addresses
+        f2b = await bounded(mailcow_api.get_fail2ban(), 'Fail2ban')
+        if security_addresses.fail2ban_answered(f2b):
+            addresses = await bounded(asyncio.to_thread(_in_session, lambda db: security_addresses.collect(db, f2b, None, 24)), 'security addresses')
+            if addresses is not None:
+                points.update(security_figures(addresses, True))
+    return points
+
+
+def slot_of(moment: datetime) -> datetime:
+    return moment.replace(minute=0, second=0, microsecond=0)
+
+
+def write_points(points: Dict[str, dict], epochs: Dict[str, int], slot: datetime) -> int:
+    from sqlalchemy.dialects.postgresql import insert
+    from ..database import get_db_context
+    from ..models import MetricSnapshot
+    written = 0
+    with get_db_context() as db:
+        try:
+            db.execute(text("SET LOCAL lock_timeout = '10s'"))
+            db.execute(text("SET LOCAL statement_timeout = '30s'"))
+            lock_metric_rows(db)
+        except Exception as e:
+            db.rollback()
+            logger.warning(f"Trend samples left out this hour: the samples are busy ({e})")
+            return 0
+        for name, figure in points.items():
+            feature = METRICS.get(name)
+            if feature and (not settings.is_feature_enabled(feature) or feature_epoch(feature) != epochs.get(feature, 0)):
+                continue
+            row = {'name': name, 'slot': slot, 'value': figure['value'], 'of': figure.get('of'), 'as_of': figure['as_of']}
+            db.execute(insert(MetricSnapshot).values(**row).on_conflict_do_update(
+                index_elements=['name', 'slot'], set_={'value': row['value'], 'of': row['of'], 'as_of': row['as_of']}))
+            written += 1
+        db.query(MetricSnapshot).filter(MetricSnapshot.slot < _now() - timedelta(days=KEEP_DAYS)).delete(synchronize_session=False)
+        db.commit()
+    return written
+
+
+def epochs_outside_a_purge() -> Dict[str, int]:
+    from ..database import get_db_context
+    with get_db_context() as db:
+        db.execute(text("SET LOCAL lock_timeout = '10s'"))
+        lock_metric_rows(db)
+        return {f: feature_epoch(f) for f in set(METRICS.values()) if f}
+
+
+async def run_trend_samples() -> int:
+    epochs = await asyncio.to_thread(epochs_outside_a_purge)
+    slot = slot_of(_now())
+    points = await collect_figures()
+    return await asyncio.to_thread(write_points, points, epochs, slot)
+
+
+def purge_feature_metrics(db: Session, feature: str) -> int:
+    from ..models import MetricSnapshot
+    names = [name for name, f in METRICS.items() if f == feature]
+    if not names:
+        return 0
+    lock_metric_rows(db)
+    bump_feature_epoch(feature)
+    return db.query(MetricSnapshot).filter(MetricSnapshot.name.in_(names)).delete(synchronize_session=False)

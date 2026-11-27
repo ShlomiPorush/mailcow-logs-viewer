@@ -1,7 +1,3 @@
-"""Issue #80: the Rspamd map must not be rewritten when nothing changed.
-The old code refreshed a timestamp comment every sync, forcing Rspamd to
-truncate + reload the map every 10 minutes and occasionally log
-"regexp map is empty" mid-write."""
 import asyncio
 from datetime import datetime
 
@@ -63,7 +59,6 @@ def _run_sync(monkeypatch, map_content):
     monkeypatch.setattr(sup.mailcow_api, 'edit_rspamd_map', fake_edit)
 
     with get_db_context() as db:
-        # only our test rows: constrain the query scope by deactivating others
         result = asyncio.run(sup.sync_suppressions_to_rspamd(db))
     return calls, result
 
@@ -95,11 +90,17 @@ def test_unchanged_map_is_not_rewritten(monkeypatch, two_suppressions):
 
 def test_changed_map_is_rewritten(monkeypatch, two_suppressions):
     from app.routers.suppressions import MANAGED_MARKER_START, MANAGED_MARKER_END
+    from app.database import get_db_context
+    from app.models import SpamSuppression
 
+    with get_db_context() as db:
+        db.query(SpamSuppression).filter(SpamSuppression.email == 'skip-b@test.example').update(
+            {SpamSuppression.synced_to_rspamd: False}, synchronize_session=False)
+        db.commit()
     content = "\n".join([
         MANAGED_MARKER_START,
         "# Last sync: 2026-07-01T00:00:00Z | Active: 1",
-        "skip-a@test.example",          # skip-b missing -> real change
+        "skip-a@test.example",
         MANAGED_MARKER_END,
     ])
     calls, result = _run_sync(monkeypatch, content)
