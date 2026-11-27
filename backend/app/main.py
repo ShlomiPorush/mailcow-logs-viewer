@@ -4,6 +4,7 @@ root.handlers = []
 
 import asyncio
 import mimetypes
+import os
 import time
 
 from fastapi import Depends, FastAPI, Request
@@ -46,7 +47,8 @@ from .routers import (
     entities as entities_router,
     users as users_router,
 )
-from .migrations import run_migrations
+from .migrations import run_migrations, run_netfilter_geoip_backfill
+from . import leader
 from .agent_access import consent as agent_consent, live as agent_live, mcp as agent_mcp, oauth as agent_oauth
 from .agent_access import skill as agent_skill
 from .agent_access.dispatch import enforce_agent_policy
@@ -139,53 +141,22 @@ def log_user_name_conflicts() -> None:
         logger.error(f"Could not compare local users with AUTH_USERNAME: {e}")
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("Starting mailcow Logs Viewer")
-    
+def load_stored_settings() -> None:
+    if not settings.edit_settings_via_ui_enabled:
+        return
+    from .database import get_db_context
+    with get_db_context() as db:
+        reload_settings(db)
+    logger.info("Settings loaded from database overrides")
     try:
-        init_db()
-        if not check_db_connection():
-            logger.error("Database connection failed!")
-            raise Exception("Cannot connect to database")
-        
-        logger.info("Running database migrations and cleanup...")
-        run_migrations()
-
-        from .migrations import run_alembic_upgrade
-        run_alembic_upgrade()
-
-        if settings.edit_settings_via_ui_enabled:
-            from .database import get_db_context
-            with get_db_context() as db:
-                reload_settings(db)
-            logger.info("Settings loaded from database overrides")
-            try:
-                mailcow_api.reload_config()
-                from .services.oauth2_client import oauth2_client
-                oauth2_client.reload_config()
-            except Exception as e:
-                logger.warning(f"Could not apply the stored settings to the mailcow and OAuth2 clients: {e}")
+        mailcow_api.reload_config()
+        from .services.oauth2_client import oauth2_client
+        oauth2_client.reload_config()
     except Exception as e:
-        logger.error(f"Failed to initialize database or load the stored settings: {e}")
-        raise
+        logger.warning(f"Could not apply the stored settings to the mailcow and OAuth2 clients: {e}")
 
-    problem = sign_in_problem(settings)
-    if problem:
-        logger.error(problem)
-        raise SettingsLoadError(problem)
 
-    logger.info(f"Configuration: {settings.fetch_interval}s interval, {settings.retention_days}d retention")
-    
-    if settings.blacklist_emails_list:
-        logger.info(f"Blacklist enabled with {len(settings.blacklist_emails_list)} email(s)")
-    
-    log_authentication_state()
-    log_agent_access_state()
-    log_user_name_conflicts()
-
-    logger.info(f"Time zone: {app_tz().key}")
-    
+def load_geoip() -> None:
     try:
         if is_license_configured():
             status = get_geoip_status()
@@ -208,28 +179,94 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Error initializing GeoIP: {e}")
 
+
+def start_schedulers() -> None:
     try:
         start_scheduler()
     except Exception as e:
         logger.error(f"Failed to start scheduler: {e}")
         raise
-    
+
     try:
         start_raw_logs_scheduler()
     except Exception as e:
         logger.error(f"Failed to start raw logs scheduler: {e}")
+
+
+async def take_over_background_work() -> None:
+    try:
+        while not leader.try_lead():
+            await asyncio.sleep(leader.RETRY_SECONDS)
+        logger.info("This container now runs the background jobs")
+        await asyncio.to_thread(load_stored_settings)
+        await asyncio.to_thread(load_geoip)
+        await asyncio.to_thread(run_netfilter_geoip_backfill)
+        start_schedulers()
+    except Exception:
+        logger.exception("Could not start the background jobs; stopping so the container restarts")
+        os._exit(1)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logger.info("Starting mailcow Logs Viewer")
     
+    try:
+        init_db()
+        if not check_db_connection():
+            logger.error("Database connection failed!")
+            raise Exception("Cannot connect to database")
+        
+        logger.info("Running database migrations and cleanup...")
+        run_migrations()
+
+        from .migrations import run_alembic_upgrade
+        run_alembic_upgrade()
+
+        load_stored_settings()
+    except Exception as e:
+        logger.error(f"Failed to initialize database or load the stored settings: {e}")
+        raise
+
+    problem = sign_in_problem(settings)
+    if problem:
+        logger.error(problem)
+        raise SettingsLoadError(problem)
+
+    logger.info(f"Configuration: {settings.fetch_interval}s interval, {settings.retention_days}d retention")
+    
+    if settings.blacklist_emails_list:
+        logger.info(f"Blacklist enabled with {len(settings.blacklist_emails_list)} email(s)")
+    
+    log_authentication_state()
+    log_agent_access_state()
+    log_user_name_conflicts()
+
+    logger.info(f"Time zone: {app_tz().key}")
+    
+    load_geoip()
+
+    takeover_task = None
+    if leader.try_lead():
+        run_netfilter_geoip_backfill()
+        start_schedulers()
+    else:
+        logger.info("Another container runs the background jobs; this one takes over when it stops")
+        takeover_task = asyncio.create_task(take_over_background_work())
+
     lag_watchdog_task = asyncio.create_task(_loop_lag_watchdog())
 
     logger.info("Application startup complete")
-    
+
     async with auth_store_maintenance():
         yield
-    
+
     logger.info("Shutting down application")
-    lag_watchdog_task.cancel()
-    with suppress(asyncio.CancelledError):
-        await lag_watchdog_task
+    for task in (takeover_task, lag_watchdog_task):
+        if task is not None:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
     stop_raw_logs_scheduler()
     stop_scheduler()
     await mailcow_api.aclose()

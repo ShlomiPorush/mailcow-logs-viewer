@@ -5,6 +5,8 @@ set -e
 # the regular image runs app.main on uvicorn's default event loop.
 set -- uvicorn "${APP_MODULE:-app.main:app}" --host 0.0.0.0 --port 8080 --workers 1 --loop "${UVICORN_LOOP:-auto}"
 
+rm -f /tmp/drain
+
 if [ "$(id -u)" = "0" ]; then
     mkdir -p /app/data
     chown -R 1000:1000 /app/data

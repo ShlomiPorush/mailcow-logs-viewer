@@ -1,5 +1,6 @@
 import logging
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException
+from .. import leader
 from pydantic import BaseModel
 from datetime import datetime, timezone, timedelta
 from typing import Any, Dict, Union
@@ -109,7 +110,7 @@ async def _address_of(host: str) -> Union[str, None]:
     return None
 
 
-@router.post("/check", response_model=None, responses=documented(Union[m.CheckStarted, m.CheckBusy, m.BlocklistCheck], description="Without a host: the check of every monitored address started in the background. With one: its check, from the cache unless force; status error when it could not run. status busy when a check (of any address, from any page or the schedule) is already running: nothing was started", errors={422: Invalid}))
+@router.post("/check", response_model=None, responses=documented(Union[m.CheckStarted, m.CheckBusy, m.BlocklistCheck], description="Without a host: the check of every monitored address started in the background. With one: its check, from the cache unless force; status error when it could not run. status busy when a check (of any address, from any page or the schedule) is already running: nothing was started", errors={422: Invalid, 503: None}), dependencies=[Depends(leader.require_leader)])
 async def check_blacklists(
     host: str = Query(None, description="Host/IP to check (default: system IP)"),
     force: bool = Query(False, description="Force new check ignoring cache")

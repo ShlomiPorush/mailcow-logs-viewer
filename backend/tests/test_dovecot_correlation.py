@@ -185,7 +185,7 @@ def _cleanup():
     from app.database import get_db_context
     from app.models import (MessageCorrelation, PostfixLog, RawServiceLog,
                             SystemSetting)
-    from app.scheduler import DOVECOT_WATERMARK_KEY
+    from app.scheduler import DOVECOT_PENDING_KEY, DOVECOT_WATERMARK_KEY
     with get_db_context() as db:
         db.query(RawServiceLog).filter(
             RawServiceLog.raw_data['message'].astext.like(f'%{MARKER}%')
@@ -195,7 +195,7 @@ def _cleanup():
         db.query(MessageCorrelation).filter(
             MessageCorrelation.message_id.like(f'%{MARKER}%')).delete(synchronize_session=False)
         db.query(SystemSetting).filter(
-            SystemSetting.key == DOVECOT_WATERMARK_KEY).delete(synchronize_session=False)
+            SystemSetting.key.in_((DOVECOT_WATERMARK_KEY, DOVECOT_PENDING_KEY))).delete(synchronize_session=False)
         db.commit()
 
 

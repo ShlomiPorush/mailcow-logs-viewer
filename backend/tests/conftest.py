@@ -62,6 +62,17 @@ def app_schema():
 
 
 @pytest.fixture(autouse=True)
+def leader_lock_in_a_temporary_directory(monkeypatch, tmp_path):
+    from app import leader
+    monkeypatch.setattr(leader, "LOCK_PATH", str(tmp_path / "leader.lock"))
+    leader.try_lead()
+    yield
+    if leader._lock_file is not None:
+        leader._lock_file.close()
+        leader._lock_file = None
+
+
+@pytest.fixture(autouse=True)
 def local_domains_loaded(monkeypatch):
     from app import config
     from app.mailcow_api import mailcow_api

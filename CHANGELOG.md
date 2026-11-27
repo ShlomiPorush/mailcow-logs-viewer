@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **mailcow 2026-11 support** - Failed logins in mailcow's new log line count again on the Security page and in the alerts, and Mailbox Stats shows mailboxes with login disabled, shared mailboxes and the last SOGo login.
 - **API reference** - `/docs` shows a working API reference served by the app itself, with what every call returns.
 - **Help on every page** - Every page has a help button, and the documentation is now a site.
+- **Updates without downtime** - A new release can start beside the running one and takes over the background jobs when the old one stops, so an update keeps the app online; the Deployment page explains what the host needs.
 
 ### Changed
 
